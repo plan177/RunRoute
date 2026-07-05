@@ -36,6 +36,13 @@
 
             <!-- Авто: выбор дистанции -->
             <div id="auto-controls">
+                <div class="distance-custom">
+                    <input type="number" id="distance-input" class="distance-input" min="0.1" max="100" step="0.1" value="5" />
+                    <div class="unit-toggle">
+                        <button id="unit-km" class="unit-btn active" data-unit="km">км</button>
+                        <button id="unit-m" class="unit-btn" data-unit="m">м</button>
+                    </div>
+                </div>
                 <div class="distance-section">
                     <div class="distance-buttons">
                         <button class="dist-btn" data-distance="1">1</button>
@@ -46,7 +53,6 @@
                         <button class="dist-btn" data-distance="21.1">21.1</button>
                         <button class="dist-btn" data-distance="42.2">42.2</button>
                     </div>
-                    <div class="distance-label">км</div>
                 </div>
                 <div id="hint-auto" class="hint">Кликните по карте чтобы поставить старт/финиш маршрута</div>
             </div>
