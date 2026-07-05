@@ -70,12 +70,48 @@ function initRouteMode() {
     document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', e => {
         document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
         e.target.classList.add('active');
-        routeMode = e.target.dataset.mode;
-        clearManualMode();
+        const newMode = e.target.dataset.mode;
+        const prevMode = routeMode;
+        routeMode = newMode;
+
+        if (newMode === 'manual' && prevMode === 'auto' && userLocation && !manualPoints.length) {
+            // Переключение сАвто на ручной — предлагаем начать от старта
+            useStartForManual();
+        } else {
+            clearManualMode();
+        }
         updateUIForMode();
     }));
     document.getElementById('clear-manual-btn').addEventListener('click', clearManualMode);
     document.getElementById('undo-manual-btn').addEventListener('click', undoLastPoint);
+}
+
+function useStartForManual() {
+    if (!userLocation) return;
+    const btn = document.getElementById('generate-btn');
+    const hint = document.getElementById('hint-manual');
+
+    // Спрашиваем пользователя
+    const confirm = window.confirm(
+        'Начать маршрут от текущей точки старта?\n\n' +
+        'Да — первая точка будет установлена автоматически\n' +
+        'Нет — очистить и начать заново'
+    );
+
+    if (confirm) {
+        // Добавляем точку старта как первую точку ручного маршрута
+        addManualPoint(userLocation.lat, userLocation.lng);
+        hint.textContent = 'Точка старта добавлена. Кликните чтобы поставить вторую точку';
+        hint.classList.remove('hidden');
+    } else {
+        clearManualMode();
+        // Убираем маркер старта если пользователь отказался
+        if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+        userLocation = null;
+        document.getElementById('location-status').textContent = '';
+        document.getElementById('location-status').className = 'status';
+        document.getElementById('generate-btn').disabled = true;
+    }
 }
 
 function updateUIForMode() {
@@ -127,6 +163,13 @@ function addManualPoint(lat, lng) {
     manualMarkers.push(marker);
     redrawManualPolyline();
     updateManualCount();
+
+    // Скрываем хинт после добавления точки
+    const hint = document.getElementById('hint-manual');
+    if (manualPoints.length >= 2) {
+        hint.classList.add('hidden');
+    }
+
     document.getElementById('generate-btn').disabled = manualPoints.length < 2;
 }
 
