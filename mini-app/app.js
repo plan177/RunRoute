@@ -695,35 +695,29 @@ function pad(n) { return n < 10 ? '0' + n : '' + n; }
 // === Share ===
 
 function initShare() {
-    document.getElementById('share-btn').addEventListener('click', shareToTelegram);
-    document.getElementById('copy-link-btn').addEventListener('click', copyRouteLink);
+    document.getElementById('share-btn').addEventListener('click', shareRoute);
 }
 
-function shareToTelegram() {
-    if (!currentRoute) return;
+function shareRoute() {
+    if (!currentRoute || !currentRoute.gpx) return;
 
     const dist = currentRoute.distance_km.toFixed(1);
     const text = '🏃 Маршрут ' + dist + ' км — построен в RunRouteBot';
-    const link = buildShareUrl();
 
+    // Скачиваем GPX файл
+    downloadGPX();
+
+    // Открываем шаринг в Telegram
     if (window.Telegram && Telegram.WebApp && Telegram.WebApp.switchInlineQuery) {
-        // Открывает выбор чата для отправки
-        Telegram.WebApp.switchInlineQuery(text + '\n' + link, ['users', 'groups', 'channels']);
+        Telegram.WebApp.switchInlineQuery(text, ['users', 'groups', 'channels']);
     } else if (navigator.share) {
-        // Мобильный Web Share API (fallback)
-        navigator.share({ title: 'RunRouteBot', text: text, url: link }).catch(() => {});
+        navigator.share({ title: 'RunRouteBot', text: text }).catch(() => {});
     } else {
-        // Десктоп — копируем в буфер
-        copyToClipboard(text + '\n' + link);
-        showToast('Текст скопирован — вставьте в чат');
+        copyToClipboard(text);
+        showToast('GPX скачан. Текст скопирован — вставьте в чат');
+        return;
     }
-}
-
-function copyRouteLink() {
-    if (!currentRoute) return;
-    const link = buildShareUrl();
-    copyToClipboard(link);
-    showToast('Ссылка скопирована!');
+    showToast('GPX скачан. Выберите чат для отправки');
 }
 
 function buildShareUrl() {

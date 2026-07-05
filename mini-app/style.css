@@ -176,13 +176,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     transition: background 0.2s;
 }
 .btn-share:hover { background: #229ED9; }
-.btn-copy-link {
-    flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: 8px;
-    background: var(--card); color: var(--text); font-size: 13px; font-weight: 600;
-    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
-    transition: all 0.2s;
-}
-.btn-copy-link:hover { border-color: var(--accent); color: var(--accent); }
 .share-toast {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
     background: var(--green); color: #fff; padding: 10px 20px; border-radius: 8px;
