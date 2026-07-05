@@ -5,7 +5,6 @@ let manualPoints = [];
 let manualMarkers = [];
 let manualPolyline = null;
 let routeSeed = 0;
-let distanceUnit = 'km'; // 'km' | 'm'
 
 // init moved to bottom of file
 
@@ -245,72 +244,11 @@ function initRouteControls() {
     document.getElementById('generate-btn').addEventListener('click', generateRoute);
     document.getElementById('regenerate-btn').addEventListener('click', regenerateRoute);
     document.getElementById('download-btn').addEventListener('click', downloadGPX);
-
-    // Preset buttons
     document.querySelectorAll('.dist-btn').forEach(b => b.addEventListener('click', e => {
         document.querySelectorAll('.dist-btn').forEach(x => x.classList.remove('active'));
         e.target.classList.add('active');
         selectedDistance = parseFloat(e.target.dataset.distance);
-        distanceUnit = 'km';
-        updateDistanceInput();
     }));
-
-    // Custom distance input
-    const distInput = document.getElementById('distance-input');
-    distInput.addEventListener('input', () => {
-        const val = parseFloat(distInput.value);
-        if (!isNaN(val) && val > 0) {
-            selectedDistance = distanceUnit === 'm' ? val / 1000 : val;
-            clearActivePreset();
-        }
-    });
-
-    // Unit toggle
-    document.getElementById('unit-km').addEventListener('click', () => switchUnit('km'));
-    document.getElementById('unit-m').addEventListener('click', () => switchUnit('m'));
-}
-
-function switchUnit(unit) {
-    if (unit === distanceUnit) return;
-    const input = document.getElementById('distance-input');
-    const val = parseFloat(input.value) || 0;
-
-    if (unit === 'm' && distanceUnit === 'km') {
-        // км → м
-        input.value = Math.round(val * 1000);
-        input.min = 100;
-        input.max = 100000;
-        input.step = 100;
-    } else if (unit === 'km' && distanceUnit === 'm') {
-        // м → км
-        input.value = parseFloat((val / 1000).toFixed(1));
-        input.min = 0.1;
-        input.max = 100;
-        input.step = 0.1;
-    }
-
-    distanceUnit = unit;
-    document.getElementById('unit-km').classList.toggle('active', unit === 'km');
-    document.getElementById('unit-m').classList.toggle('active', unit === 'm');
-
-    // Обновляем selectedDistance
-    selectedDistance = unit === 'm' ? parseFloat(input.value) / 1000 : parseFloat(input.value);
-    clearActivePreset();
-}
-
-function updateDistanceInput() {
-    const input = document.getElementById('distance-input');
-    input.value = selectedDistance;
-    input.min = 0.1;
-    input.max = 100;
-    input.step = 0.1;
-    distanceUnit = 'km';
-    document.getElementById('unit-km').classList.add('active');
-    document.getElementById('unit-m').classList.remove('active');
-}
-
-function clearActivePreset() {
-    document.querySelectorAll('.dist-btn').forEach(x => x.classList.remove('active'));
 }
 
 async function generateRoute() {
