@@ -13,11 +13,19 @@ function initTelegram() {
     if (window.Telegram && window.Telegram.WebApp) {
         Telegram.WebApp.ready();
         Telegram.WebApp.expand();
+        // Fix iOS touch issues
+        if (Telegram.WebApp.platform === 'ios') {
+            document.body.style.webkitOverflowScrolling = 'touch';
+        }
     }
 }
 
 function initMap() {
-    map = L.map('map').setView([55.7558, 37.6173], 13);
+    map = L.map('map', {
+        tap: true,
+        tapTimeout: 300,
+        bounceAtZoomLimits: false
+    }).setView([55.7558, 37.6173], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap'
     }).addTo(map);

@@ -10,45 +10,59 @@
     --danger: #f85149;
     --gradient: linear-gradient(135deg, #238636, #2ea043);
 }
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--tg-theme-bg-color, var(--bg)) !important; color: var(--tg-theme-text-color, var(--text)) !important; min-height: 100vh; }
-.app { padding: 10px; max-width: 480px; margin: 0 auto; }
-.header { text-align: center; padding: 8px 0; }
-.header h1 { font-size: 22px; font-weight: 700; }
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--tg-theme-bg-color, var(--bg)) !important;
+    color: var(--tg-theme-text-color, var(--text)) !important;
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+.app { padding: 12px; max-width: 480px; margin: 0 auto; position: relative; z-index: 1; }
+.header { text-align: center; padding: 6px 0; }
+.header h1 { font-size: 20px; font-weight: 700; }
 
-.tabs { display: flex; gap: 4px; margin-bottom: 10px; background: var(--card); padding: 3px; border-radius: 10px; }
-.tab { flex: 1; padding: 10px; border: none; border-radius: 8px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+/* Tabs */
+.tabs { display: flex; gap: 4px; margin-bottom: 10px; background: var(--card); padding: 3px; border-radius: 10px; position: relative; z-index: 10; }
+.tab { flex: 1; padding: 10px; border: none; border-radius: 8px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; touch-action: manipulation; }
 .tab.active { background: var(--tg-theme-button-color, var(--accent)); color: var(--tg-theme-button-text-color, #000); }
+.tab-content { display: block; }
+.tab-content.hidden { display: none !important; }
 
-.search-box { display: flex; gap: 6px; margin-bottom: 8px; }
-.search-box input { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font-size: 14px; }
+/* Search */
+.search-box { display: flex; gap: 6px; margin-bottom: 8px; position: relative; z-index: 10; }
+.search-box input { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font-size: 14px; min-width: 0; touch-action: manipulation; }
 .search-box input:focus { outline: none; border-color: var(--accent); }
-.btn-search { padding: 10px 14px; border: none; border-radius: 8px; background: var(--tg-theme-button-color, var(--accent)); color: var(--tg-theme-button-text-color, #000); font-size: 13px; font-weight: 600; cursor: pointer; }
-.status { font-size: 11px; color: var(--muted); margin-bottom: 8px; min-height: 16px; }
+.btn-search { padding: 10px 14px; border: none; border-radius: 8px; background: var(--tg-theme-button-color, var(--accent)); color: var(--tg-theme-button-text-color, #000); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; touch-action: manipulation; }
+.status { font-size: 11px; color: var(--muted); margin-bottom: 8px; min-height: 16px; word-break: break-word; }
 .status.success { color: var(--green); }
 .status.error { color: var(--danger); }
 
 /* Mode switcher */
-.mode-section { display: flex; gap: 4px; margin-bottom: 8px; background: var(--card); padding: 3px; border-radius: 8px; }
-.mode-btn { flex: 1; padding: 8px; border: none; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.mode-section { display: flex; gap: 4px; margin-bottom: 8px; background: var(--card); padding: 3px; border-radius: 8px; position: relative; z-index: 10; }
+.mode-btn { flex: 1; padding: 8px; border: none; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; touch-action: manipulation; }
 .mode-btn.active { background: var(--accent); color: #000; }
 
-.distance-section { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+/* Distance buttons (auto mode) */
+.distance-section { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; position: relative; z-index: 10; }
 .distance-buttons { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
-.dist-btn { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; min-width: 40px; text-align: center; }
+.dist-btn { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; min-width: 40px; text-align: center; touch-action: manipulation; }
 .dist-btn.active { background: var(--gradient); color: #fff; border-color: transparent; }
 .distance-label { font-size: 13px; color: var(--muted); font-weight: 600; }
 
 /* Manual mode */
-.manual-info { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 8px 12px; background: var(--card); border-radius: 8px; }
+.manual-info { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; padding: 8px 12px; background: var(--card); border-radius: 8px; flex-wrap: wrap; position: relative; z-index: 10; }
 .manual-count { font-size: 13px; font-weight: 600; color: var(--accent); }
-.btn-clear { padding: 6px 12px; border: 1px solid var(--danger); border-radius: 6px; background: transparent; color: var(--danger); font-size: 11px; font-weight: 600; cursor: pointer; }
-.btn-undo { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.btn-clear { padding: 6px 12px; border: 1px solid var(--danger); border-radius: 6px; background: transparent; color: var(--danger); font-size: 11px; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+.btn-undo { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s; touch-action: manipulation; }
 .btn-undo:hover { border-color: var(--accent); color: var(--accent); }
 .btn-close-route {
     padding: 6px 10px; border: 1px solid var(--green); border-radius: 6px;
     background: transparent; color: var(--green); font-size: 11px; font-weight: 600;
-    cursor: pointer; transition: all 0.2s;
+    cursor: pointer; transition: all 0.2s; touch-action: manipulation;
 }
 .btn-close-route:hover { background: var(--green); color: #fff; }
 
@@ -86,34 +100,37 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 
 .hint { font-size: 12px; color: var(--muted); text-align: center; margin: 8px 0; padding: 8px; background: var(--card); border-radius: 8px; }
 
-.action-buttons { margin-top: 8px; }
-.btn-main { width: 100%; padding: 14px; border: none; border-radius: 10px; background: var(--gradient); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; }
+/* Action buttons */
+.action-buttons { margin-top: 8px; position: relative; z-index: 10; }
+.btn-main { width: 100%; padding: 14px; border: none; border-radius: 10px; background: var(--gradient); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; touch-action: manipulation; }
 .btn-main:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-row { display: flex; gap: 8px; margin-top: 8px; }
-.btn-secondary { flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
-.btn-accent { flex: 1; padding: 10px; border: none; border-radius: 8px; background: var(--accent); color: #000; font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn-secondary { flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+.btn-accent { flex: 1; padding: 10px; border: none; border-radius: 8px; background: var(--accent); color: #000; font-size: 13px; font-weight: 600; cursor: pointer; touch-action: manipulation; }
 
-.map { height: 380px; border-radius: 10px; overflow: hidden; margin: 10px 0; border: 1px solid var(--border); }
+/* Map */
+.map { height: 50vh; min-height: 250px; border-radius: 10px; overflow: hidden; margin: 10px 0; border: 1px solid var(--border); position: relative; z-index: 1; }
 
+/* Route info */
 .route-info { display: flex; justify-content: space-around; padding: 10px; background: var(--card); border-radius: 10px; margin-top: 8px; }
 .info-item { text-align: center; }
 .info-label { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; }
 .info-value { font-size: 16px; font-weight: 700; color: var(--accent); }
 
 /* Pace Calculator */
-.pace-calc { background: var(--card); border-radius: 10px; padding: 14px; }
+.pace-calc { background: var(--card); border-radius: 10px; padding: 14px; position: relative; z-index: 10; }
 .pace-field { margin-bottom: 14px; }
 .pace-field label { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; font-weight: 600; }
 .dist-buttons-pace { display: flex; gap: 4px; flex-wrap: wrap; }
-.dp-btn { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card2); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; }
+.dp-btn { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card2); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; touch-action: manipulation; }
 .dp-btn.active { background: var(--accent); color: #000; border-color: transparent; }
 .pace-dist-inputs { margin-bottom: 8px; }
-.time-inputs { display: flex; align-items: center; gap: 4px; }
-.time-input { width: 50px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--card2); color: var(--text); font-size: 16px; font-weight: 600; text-align: center; }
+.time-inputs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.time-input { width: 50px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--card2); color: var(--text); font-size: 16px; font-weight: 600; text-align: center; touch-action: manipulation; }
 .time-input:focus { outline: none; border-color: var(--accent); }
 .time-sep { font-size: 12px; color: var(--muted); }
 .pace-result { display: flex; gap: 8px; margin-top: 4px; }
-.result-item { flex: 1; text-align: center; padding: 10px 4px; background: var(--card2); border-radius: 8px; }
+.result-item { flex: 1; text-align: center; padding: 10px 4px; background: var(--card2); border-radius: 8px; min-width: 0; }
 .result-label { display: block; font-size: 9px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
 .result-value { display: block; font-size: 20px; font-weight: 700; color: var(--green); }
 .result-unit { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
@@ -121,7 +138,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .lap-btn {
     flex: 1; padding: 4px 0; border: 1px solid var(--border); border-radius: 4px;
     background: transparent; color: var(--muted); font-size: 10px; font-weight: 600;
-    cursor: pointer; transition: all 0.2s;
+    cursor: pointer; transition: all 0.2s; touch-action: manipulation;
 }
 .lap-btn.active { background: var(--accent); color: #000; border-color: transparent; }
 .lap-btn:hover { border-color: var(--accent); }
@@ -200,4 +217,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 @keyframes toastIn {
     from { opacity: 0; transform: translateX(-50%) translateY(10px); }
     to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Mobile adjustments */
+@media (max-width: 400px) {
+    .app { padding: 8px; }
+    .header h1 { font-size: 18px; }
+    .tab { padding: 8px; font-size: 12px; }
+    .dist-btn { padding: 6px 8px; font-size: 12px; min-width: 36px; }
+    .btn-main { padding: 12px; font-size: 14px; }
+    .time-input { width: 44px; font-size: 14px; }
+    .result-value { font-size: 16px; }
+    .map { height: 45vh; min-height: 220px; }
 }
