@@ -70,12 +70,63 @@ function initRouteMode() {
     document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', e => {
         document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
         e.target.classList.add('active');
-        routeMode = e.target.dataset.mode;
-        clearManualMode();
+        const newMode = e.target.dataset.mode;
+        const prevMode = routeMode;
+        routeMode = newMode;
+
+        if (newMode === 'manual' && prevMode === 'auto' && userLocation && !manualPoints.length) {
+            // Переключение сАвто на ручной — предлагаем начать от старта
+            useStartForManual();
+        } else {
+            clearManualMode();
+        }
         updateUIForMode();
     }));
     document.getElementById('clear-manual-btn').addEventListener('click', clearManualMode);
     document.getElementById('undo-manual-btn').addEventListener('click', undoLastPoint);
+}
+
+function useStartForManual() {
+    if (!userLocation) return;
+
+    showConfirmModal('Начать маршрут от текущей точки?').then(confirmed => {
+        if (confirmed) {
+            addManualPoint(userLocation.lat, userLocation.lng);
+            const hint = document.getElementById('hint-manual');
+            hint.textContent = 'Точка старта добавлена. Кликните чтобы поставить вторую точку';
+            hint.classList.remove('hidden');
+        } else {
+            clearManualMode();
+            if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+            userLocation = null;
+            document.getElementById('location-status').textContent = '';
+            document.getElementById('location-status').className = 'status';
+            document.getElementById('generate-btn').disabled = true;
+        }
+    });
+}
+
+function showConfirmModal(text) {
+    return new Promise(resolve => {
+        const modal = document.getElementById('confirm-modal');
+        const textEl = document.getElementById('confirm-text');
+        const yesBtn = document.getElementById('confirm-yes');
+        const noBtn = document.getElementById('confirm-no');
+
+        textEl.textContent = text;
+        modal.classList.remove('hidden');
+
+        function cleanup(result) {
+            modal.classList.add('hidden');
+            yesBtn.removeEventListener('click', onYes);
+            noBtn.removeEventListener('click', onNo);
+            resolve(result);
+        }
+        function onYes() { cleanup(true); }
+        function onNo() { cleanup(false); }
+        yesBtn.addEventListener('click', onYes);
+        noBtn.addEventListener('click', onNo);
+    });
 }
 
 function updateUIForMode() {
@@ -127,6 +178,13 @@ function addManualPoint(lat, lng) {
     manualMarkers.push(marker);
     redrawManualPolyline();
     updateManualCount();
+
+    // Скрываем хинт после добавления точки
+    const hint = document.getElementById('hint-manual');
+    if (manualPoints.length >= 2) {
+        hint.classList.add('hidden');
+    }
+
     document.getElementById('generate-btn').disabled = manualPoints.length < 2;
 }
 
