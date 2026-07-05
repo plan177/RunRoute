@@ -88,30 +88,45 @@ function initRouteMode() {
 
 function useStartForManual() {
     if (!userLocation) return;
-    const btn = document.getElementById('generate-btn');
-    const hint = document.getElementById('hint-manual');
 
-    // Спрашиваем пользователя
-    const confirm = window.confirm(
-        'Начать маршрут от текущей точки старта?\n\n' +
-        'Да — первая точка будет установлена автоматически\n' +
-        'Нет — очистить и начать заново'
-    );
+    showConfirmModal('Начать маршрут от текущей точки?').then(confirmed => {
+        if (confirmed) {
+            addManualPoint(userLocation.lat, userLocation.lng);
+            const hint = document.getElementById('hint-manual');
+            hint.textContent = 'Точка старта добавлена. Кликните чтобы поставить вторую точку';
+            hint.classList.remove('hidden');
+        } else {
+            clearManualMode();
+            if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+            userLocation = null;
+            document.getElementById('location-status').textContent = '';
+            document.getElementById('location-status').className = 'status';
+            document.getElementById('generate-btn').disabled = true;
+        }
+    });
+}
 
-    if (confirm) {
-        // Добавляем точку старта как первую точку ручного маршрута
-        addManualPoint(userLocation.lat, userLocation.lng);
-        hint.textContent = 'Точка старта добавлена. Кликните чтобы поставить вторую точку';
-        hint.classList.remove('hidden');
-    } else {
-        clearManualMode();
-        // Убираем маркер старта если пользователь отказался
-        if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
-        userLocation = null;
-        document.getElementById('location-status').textContent = '';
-        document.getElementById('location-status').className = 'status';
-        document.getElementById('generate-btn').disabled = true;
-    }
+function showConfirmModal(text) {
+    return new Promise(resolve => {
+        const modal = document.getElementById('confirm-modal');
+        const textEl = document.getElementById('confirm-text');
+        const yesBtn = document.getElementById('confirm-yes');
+        const noBtn = document.getElementById('confirm-no');
+
+        textEl.textContent = text;
+        modal.classList.remove('hidden');
+
+        function cleanup(result) {
+            modal.classList.add('hidden');
+            yesBtn.removeEventListener('click', onYes);
+            noBtn.removeEventListener('click', onNo);
+            resolve(result);
+        }
+        function onYes() { cleanup(true); }
+        function onNo() { cleanup(false); }
+        yesBtn.addEventListener('click', onYes);
+        noBtn.addEventListener('click', onNo);
+    });
 }
 
 function updateUIForMode() {
