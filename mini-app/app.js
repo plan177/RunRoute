@@ -277,9 +277,13 @@ function searchAddress() {
     const c = parseCoord(input);
     if (c) {
         userLocation = c;
-        setStartMarker(c.lat, c.lng);
+        if (routeMode === 'manual') {
+            addManualPoint(c.lat, c.lng);
+        } else {
+            setStartMarker(c.lat, c.lng);
+        }
         map.setView([c.lat, c.lng], 15);
-        status.textContent = 'Старт/финиш: ' + c.lat.toFixed(5) + ', ' + c.lng.toFixed(5);
+        status.textContent = c.lat.toFixed(5) + ', ' + c.lng.toFixed(5);
         status.className = 'status success';
         document.getElementById('generate-btn').disabled = false;
         return;
@@ -297,9 +301,13 @@ function searchAddress() {
         if (data && data.length > 0) {
             const item = data[0];
             userLocation = { lat: parseFloat(item.lat), lng: parseFloat(item.lon) };
-            setStartMarker(userLocation.lat, userLocation.lng);
+            if (routeMode === 'manual') {
+                addManualPoint(userLocation.lat, userLocation.lng);
+            } else {
+                setStartMarker(userLocation.lat, userLocation.lng);
+            }
             map.setView([userLocation.lat, userLocation.lng], 15);
-            status.textContent = 'Старт/финиш: ' + item.display_name.split(',').slice(0, 3).join(',');
+            status.textContent = item.display_name.split(',').slice(0, 3).join(',');
             status.className = 'status success';
             document.getElementById('generate-btn').disabled = false;
         } else {
