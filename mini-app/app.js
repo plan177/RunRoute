@@ -698,26 +698,31 @@ function initShare() {
     document.getElementById('share-btn').addEventListener('click', shareRoute);
 }
 
-function shareRoute() {
+async function shareRoute() {
     if (!currentRoute || !currentRoute.gpx) return;
 
     const dist = currentRoute.distance_km.toFixed(1);
-    const text = '🏃 Маршрут ' + dist + ' км — построен в RunRouteBot';
+    const fileName = 'route_' + dist + 'km.gpx';
+    const file = new File([currentRoute.gpx], fileName, { type: 'application/gpx+xml' });
 
-    // Скачиваем GPX файл
-    downloadGPX();
-
-    // Открываем шаринг в Telegram
-    if (window.Telegram && Telegram.WebApp && Telegram.WebApp.switchInlineQuery) {
-        Telegram.WebApp.switchInlineQuery(text, ['users', 'groups', 'channels']);
-    } else if (navigator.share) {
-        navigator.share({ title: 'RunRouteBot', text: text }).catch(() => {});
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+            await navigator.share({
+                files: [file],
+                title: 'Маршрут ' + dist + ' км',
+                text: '🏃 Маршрут ' + dist + ' км — RunRouteBot'
+            });
+            showToast('Маршрут отправлен');
+        } catch (e) {
+            if (e.name !== 'AbortError') {
+                downloadGPX();
+                showToast('GPX скачан');
+            }
+        }
     } else {
-        copyToClipboard(text);
-        showToast('GPX скачан. Текст скопирован — вставьте в чат');
-        return;
+        downloadGPX();
+        showToast('GPX скачан — отправьте файл вручную');
     }
-    showToast('GPX скачан. Выберите чат для отправки');
 }
 
 function buildShareUrl() {
