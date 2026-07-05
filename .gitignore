@@ -1,0 +1,21 @@
+# Secrets
+.env
+
+# Claude Code
+.claude/
+
+# Logs
+bot.log
+
+# Graphify output
+graphify-out/
+
+# Documentation
+README.md
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/

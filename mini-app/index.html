@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RunRouteBot</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <h1>RunRouteBot</h1>
+        </header>
+
+        <div class="tabs">
+            <button class="tab active" data-tab="route">Маршрут</button>
+            <button class="tab" data-tab="pace">Темп</button>
+        </div>
+
+        <div id="tab-route" class="tab-content">
+            <!-- Поиск -->
+            <div class="search-box">
+                <input type="text" id="address-input" placeholder="Город, адрес или координаты..." />
+                <button id="search-btn" class="btn-search">Найти</button>
+            </div>
+            <div id="location-status" class="status"></div>
+
+            <!-- Режим построения -->
+            <div class="mode-section">
+                <button class="mode-btn active" data-mode="auto">Авто</button>
+                <button class="mode-btn" data-mode="manual">Вручную</button>
+            </div>
+
+            <!-- Авто: выбор дистанции -->
+            <div id="auto-controls">
+                <div class="distance-section">
+                    <div class="distance-buttons">
+                        <button class="dist-btn" data-distance="1">1</button>
+                        <button class="dist-btn" data-distance="3">3</button>
+                        <button class="dist-btn active" data-distance="5">5</button>
+                        <button class="dist-btn" data-distance="10">10</button>
+                        <button class="dist-btn" data-distance="15">15</button>
+                        <button class="dist-btn" data-distance="21.1">21.1</button>
+                        <button class="dist-btn" data-distance="42.2">42.2</button>
+                    </div>
+                    <div class="distance-label">км</div>
+                </div>
+                <div id="hint-auto" class="hint">Кликните по карте чтобы поставить точку старта</div>
+            </div>
+
+            <!-- Ручной: подсказка -->
+            <div id="manual-controls" class="hidden">
+                <div class="manual-info">
+                    <span id="manual-count" class="manual-count">0 точек</span>
+                    <button id="clear-manual-btn" class="btn-clear">Очистить</button>
+                </div>
+                <div id="hint-manual" class="hint hidden">Кликайте по карте чтобы добавлять точки маршрута</div>
+            </div>
+
+            <!-- Кнопки -->
+            <div class="action-buttons">
+                <button id="generate-btn" class="btn-main" disabled>Построить маршрут</button>
+                <div class="btn-row">
+                    <button id="regenerate-btn" class="btn-secondary hidden">Заново</button>
+                    <button id="download-btn" class="btn-accent hidden">GPX</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-pace" class="tab-content hidden">
+            <div class="pace-calc">
+                <div class="pace-field">
+                    <label>Дистанция</label>
+                    <div class="dist-buttons-pace">
+                        <button class="dp-btn" data-dist="1000">1 км</button>
+                        <button class="dp-btn" data-dist="3000">3 км</button>
+                        <button class="dp-btn active" data-dist="5000">5 км</button>
+                        <button class="dp-btn" data-dist="10000">10 км</button>
+                        <button class="dp-btn" data-dist="21097">Полумарафон</button>
+                        <button class="dp-btn" data-dist="42195">Марафон</button>
+                    </div>
+                </div>
+
+                <div class="pace-field">
+                    <label>Результат</label>
+                    <div class="time-inputs">
+                        <input type="number" id="pace-h" min="0" max="10" value="0" class="time-input" />
+                        <span class="time-sep">ч</span>
+                        <input type="number" id="pace-m" min="0" max="59" value="25" class="time-input" />
+                        <span class="time-sep">мин</span>
+                        <input type="number" id="pace-s" min="0" max="59" value="0" class="time-input" />
+                        <span class="time-sep">сек</span>
+                    </div>
+                </div>
+
+                <div class="pace-result">
+                    <div class="result-item">
+                        <span class="result-label">Темп</span>
+                        <span id="result-pace" class="result-value">5:00</span>
+                        <span class="result-unit">мин/км</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Скорость</span>
+                        <span id="result-speed" class="result-value">12.0</span>
+                        <span class="result-unit">км/ч</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Время на 400м</span>
+                        <span id="result-lap" class="result-value">2:00</span>
+                        <span class="result-unit">мин</span>
+                    </div>
+                </div>
+
+                <div id="splits-container" class="splits-section"></div>
+            </div>
+        </div>
+
+        <div id="map" class="map"></div>
+
+        <div id="route-info" class="route-info hidden">
+            <div class="info-item">
+                <span class="info-label">Дистанция</span>
+                <span id="route-distance" class="info-value">0 км</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Точность</span>
+                <span id="route-accuracy" class="info-value">--</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
