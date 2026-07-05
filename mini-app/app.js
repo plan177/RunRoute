@@ -293,8 +293,8 @@ function regenerateAutoRoute() {
 }
 
 async function buildPreciseRoute(lat, lng, targetKm) {
-    const MAX_ITERATIONS = 10;
-    const TOLERANCE_KM = 0.05; // 50 метров
+    const MAX_ITERATIONS = 15;
+    const TOLERANCE_KM = 0.1; // 100 метров — достаточно для бега
     let bestRoute = null;
     let bestDiff = Infinity;
     let radiusKm = targetKm / (2 * Math.PI); // начальный радиус
@@ -302,8 +302,7 @@ async function buildPreciseRoute(lat, lng, targetKm) {
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
         const route = await tryBuildTrip(lat, lng, radiusKm);
         if (!route) {
-            // Увеличиваем радиус если OSRM не вернул маршрут
-            radiusKm *= 1.1;
+            radiusKm *= 1.15;
             continue;
         }
 
@@ -329,7 +328,6 @@ async function buildPreciseRoute(lat, lng, targetKm) {
 }
 
 async function tryBuildTrip(lat, lng, radiusKm) {
-    const numPts = getNumWaypoints(radiusKm * 2 * Math.PI);
     const latRad = lat * Math.PI / 180;
     const latDegPerKm = 1 / 111.32;
     const lngDegPerKm = 1 / (111.32 * Math.cos(latRad));
@@ -339,8 +337,9 @@ async function tryBuildTrip(lat, lng, radiusKm) {
     // Сдвиг угла на основе seed для вариативности при перегенерации
     const angleOffset = (routeSeed * 0.7) % (2 * Math.PI);
 
-    // Равномерный круг со сдвигом
-    const waypoints = [];
+    // 8 waypoints — достаточно для чистого круга, без петель
+    const numPts = 8;
+    const waypoints = [[lng, lat]]; // старт
     for (let i = 0; i < numPts; i++) {
         const angle = angleOffset + (2 * Math.PI * i) / numPts;
         waypoints.push([
@@ -348,38 +347,28 @@ async function tryBuildTrip(lat, lng, radiusKm) {
             lat + rLat * Math.sin(angle)
         ]);
     }
+    waypoints.push([lng, lat]); // финиш = старт
 
-    // Добавляем точку старта/финиша в начало и конец для roundtrip
-    const allWaypoints = [[lng, lat], ...waypoints, [lng, lat]];
-    const coords = allWaypoints.map(p => p[0].toFixed(6) + ',' + p[1].toFixed(6)).join(';');
+    const coords = waypoints.map(p => p[0].toFixed(6) + ',' + p[1].toFixed(6)).join(';');
 
-    // OSRM trip endpoint — оптимизирует roundtrip
-    const url = 'https://router.project-osrm.org/trip/v1/foot/' + coords +
-        '?roundtrip=true&source=first&destination=last&geometries=geojson&steps=false';
+    // OSRM route — следует порядку точек, без петель
+    const url = 'https://router.project-osrm.org/route/v1/foot/' + coords +
+        '?overview=full&geometries=geojson&steps=false';
 
     try {
         const resp = await fetch(url);
         const data = await resp.json();
 
-        if (data.code !== 'Ok' || !data.trips || data.trips.length === 0) return null;
+        if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) return null;
 
-        const trip = data.trips[0];
-        const points = trip.geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
+        const route = data.routes[0];
+        const points = route.geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
         const distance_km = haversineArr(points);
 
         return { points, distance_km };
     } catch {
         return null;
     }
-}
-
-function getNumWaypoints(targetKm) {
-    if (targetKm <= 3) return 12;
-    if (targetKm <= 5) return 16;
-    if (targetKm <= 10) return 20;
-    if (targetKm <= 15) return 24;
-    if (targetKm <= 21) return 28;
-    return 32;
 }
 
 function buildPerfectCircle(lat, lng, targetKm) {
