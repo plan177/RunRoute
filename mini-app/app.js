@@ -4,6 +4,7 @@ let routeMode = 'auto'; // 'auto' | 'manual'
 let manualPoints = [];
 let manualMarkers = [];
 let manualPolyline = null;
+let routeSeed = 0;
 
 // init moved to bottom of file
 
@@ -42,8 +43,9 @@ function onMapClick(e) {
     }
     userLocation = { lat: e.latlng.lat, lng: e.latlng.lng };
     setStartMarker(userLocation.lat, userLocation.lng);
+    map.setView([userLocation.lat, userLocation.lng], 15);
     document.getElementById('location-status').textContent =
-        userLocation.lat.toFixed(5) + ', ' + userLocation.lng.toFixed(5);
+        'Старт/финиш: ' + userLocation.lat.toFixed(5) + ', ' + userLocation.lng.toFixed(5);
     document.getElementById('location-status').className = 'status success';
     document.getElementById('generate-btn').disabled = false;
 }
@@ -53,10 +55,13 @@ function setStartMarker(lat, lng) {
     startMarker = L.marker([lat, lng], {
         icon: L.divIcon({
             className: 'waypoint-marker',
-            html: '<div style="background:#3fb950;color:#fff;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);">★</div>',
-            iconSize: [28, 28], iconAnchor: [14, 14]
+            html: '<div class="start-finish-marker" title="Старт / Финиш">' +
+                  '<span>▶</span><span>◀</span>' +
+                  '</div>',
+            iconSize: [32, 32], iconAnchor: [16, 16]
         })
     }).addTo(map);
+    startMarker.bindTooltip('Старт / Финиш', { permanent: true, direction: 'top', offset: [0, -18] });
 }
 
 // === Route Mode Switch ===
@@ -193,8 +198,8 @@ function searchAddress() {
     if (c) {
         userLocation = c;
         setStartMarker(c.lat, c.lng);
-        map.setView([c.lat, c.lng], 14);
-        status.textContent = c.lat.toFixed(5) + ', ' + c.lng.toFixed(5);
+        map.setView([c.lat, c.lng], 15);
+        status.textContent = 'Старт/финиш: ' + c.lat.toFixed(5) + ', ' + c.lng.toFixed(5);
         status.className = 'status success';
         document.getElementById('generate-btn').disabled = false;
         return;
@@ -213,8 +218,8 @@ function searchAddress() {
             const item = data[0];
             userLocation = { lat: parseFloat(item.lat), lng: parseFloat(item.lon) };
             setStartMarker(userLocation.lat, userLocation.lng);
-            map.setView([userLocation.lat, userLocation.lng], 14);
-            status.textContent = item.display_name.split(',').slice(0, 3).join(',');
+            map.setView([userLocation.lat, userLocation.lng], 15);
+            status.textContent = 'Старт/финиш: ' + item.display_name.split(',').slice(0, 3).join(',');
             status.className = 'status success';
             document.getElementById('generate-btn').disabled = false;
         } else {
@@ -237,7 +242,7 @@ function parseCoord(s) {
 
 function initRouteControls() {
     document.getElementById('generate-btn').addEventListener('click', generateRoute);
-    document.getElementById('regenerate-btn').addEventListener('click', generateRoute);
+    document.getElementById('regenerate-btn').addEventListener('click', regenerateRoute);
     document.getElementById('download-btn').addEventListener('click', downloadGPX);
     document.querySelectorAll('.dist-btn').forEach(b => b.addEventListener('click', e => {
         document.querySelectorAll('.dist-btn').forEach(x => x.classList.remove('active'));
@@ -251,6 +256,14 @@ async function generateRoute() {
         await generateManualRoute();
     } else {
         await generateAutoRoute();
+    }
+}
+
+function regenerateRoute() {
+    if (routeMode === 'manual') {
+        generateManualRoute();
+    } else {
+        regenerateAutoRoute();
     }
 }
 
@@ -272,6 +285,11 @@ async function generateAutoRoute() {
         btn.textContent = 'Построить маршрут';
         btn.disabled = false;
     }
+}
+
+function regenerateAutoRoute() {
+    routeSeed++;
+    generateAutoRoute();
 }
 
 async function buildPreciseRoute(lat, lng, targetKm) {
@@ -318,21 +336,26 @@ async function tryBuildTrip(lat, lng, radiusKm) {
     const rLat = radiusKm * latDegPerKm;
     const rLng = radiusKm * lngDegPerKm;
 
-    // Чистый равномерный круг без рандомизации
+    // Сдвиг угла на основе seed для вариативности при перегенерации
+    const angleOffset = (routeSeed * 0.7) % (2 * Math.PI);
+
+    // Равномерный круг со сдвигом
     const waypoints = [];
     for (let i = 0; i < numPts; i++) {
-        const angle = (2 * Math.PI * i) / numPts;
+        const angle = angleOffset + (2 * Math.PI * i) / numPts;
         waypoints.push([
             lng + rLng * Math.cos(angle),
             lat + rLat * Math.sin(angle)
         ]);
     }
 
-    const coords = waypoints.map(p => p[0].toFixed(6) + ',' + p[1].toFixed(6)).join(';');
+    // Добавляем точку старта/финиша в начало и конец для roundtrip
+    const allWaypoints = [[lng, lat], ...waypoints, [lng, lat]];
+    const coords = allWaypoints.map(p => p[0].toFixed(6) + ',' + p[1].toFixed(6)).join(';');
 
     // OSRM trip endpoint — оптимизирует roundtrip
     const url = 'https://router.project-osrm.org/trip/v1/foot/' + coords +
-        '?roundtrip=true&source=first&geometries=geojson&steps=false';
+        '?roundtrip=true&source=first&destination=last&geometries=geojson&steps=false';
 
     try {
         const resp = await fetch(url);
@@ -366,15 +389,17 @@ function buildPerfectCircle(lat, lng, targetKm) {
     const lngDegPerKm = 1 / (111.32 * Math.cos(lat * Math.PI / 180));
     const rLat = radiusKm * latDegPerKm;
     const rLng = radiusKm * lngDegPerKm;
+    const angleOffset = (routeSeed * 0.7) % (2 * Math.PI);
 
-    const points = [];
+    const points = [{ lat, lng }]; // старт/финиш
     for (let i = 0; i <= numPts; i++) {
-        const angle = (2 * Math.PI * i) / numPts;
+        const angle = angleOffset + (2 * Math.PI * i) / numPts;
         points.push({
             lat: lat + rLat * Math.sin(angle),
             lng: lng + rLng * Math.cos(angle)
         });
     }
+    points.push({ lat, lng }); // замыкаем в старт
 
     const distance_km = haversineArr(points);
     return { points, distance_km };

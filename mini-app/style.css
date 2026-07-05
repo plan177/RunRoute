@@ -124,3 +124,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .hidden { display: none !important; }
 .leaflet-control-zoom a { background: var(--card) !important; color: var(--text) !important; border-color: var(--border) !important; }
 .waypoint-marker { background: none !important; border: none !important; }
+
+/* Start/Finish marker */
+.start-finish-marker {
+    width: 32px; height: 32px;
+    background: var(--green);
+    color: #fff;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    gap: 1px;
+    font-size: 10px; font-weight: 700;
+    border: 3px solid #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    cursor: pointer;
+    transition: transform 0.15s;
+}
+.start-finish-marker:hover { transform: scale(1.1); }
