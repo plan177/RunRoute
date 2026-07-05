@@ -480,16 +480,39 @@ function displayRoute(route) {
 // === Pace Calculator ===
 
 function initPace() {
+    // Preset buttons
     document.querySelectorAll('.dp-btn').forEach(b => b.addEventListener('click', e => {
         document.querySelectorAll('.dp-btn').forEach(x => x.classList.remove('active'));
         e.target.classList.add('active');
         selectedPaceDist = parseInt(e.target.dataset.dist);
+        updatePaceDistInputs();
         calcPace();
     }));
+
+    // Custom distance inputs
+    document.getElementById('pace-dist-km').addEventListener('input', onPaceDistInput);
+    document.getElementById('pace-dist-m').addEventListener('input', onPaceDistInput);
+
+    // Time inputs
     document.getElementById('pace-h').addEventListener('input', calcPace);
     document.getElementById('pace-m').addEventListener('input', calcPace);
     document.getElementById('pace-s').addEventListener('input', calcPace);
-    calcPace(); // начальный расчет
+    calcPace();
+}
+
+function onPaceDistInput() {
+    const km = parseInt(document.getElementById('pace-dist-km').value) || 0;
+    const m = parseInt(document.getElementById('pace-dist-m').value) || 0;
+    selectedPaceDist = km * 1000 + m;
+    document.querySelectorAll('.dp-btn').forEach(x => x.classList.remove('active'));
+    calcPace();
+}
+
+function updatePaceDistInputs() {
+    const km = Math.floor(selectedPaceDist / 1000);
+    const m = selectedPaceDist % 1000;
+    document.getElementById('pace-dist-km').value = km;
+    document.getElementById('pace-dist-m').value = m;
 }
 
 function calcPace() {
