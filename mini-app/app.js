@@ -5,6 +5,7 @@ let manualPoints = [];
 let manualMarkers = [];
 let manualPolyline = null;
 let routeSeed = 0;
+let selectedLapDist = 400; // 200, 400, 800
 
 // init moved to bottom of file
 
@@ -566,6 +567,16 @@ function initPace() {
     document.getElementById('pace-h').addEventListener('input', calcPace);
     document.getElementById('pace-m').addEventListener('input', calcPace);
     document.getElementById('pace-s').addEventListener('input', calcPace);
+
+    // Lap distance switcher
+    document.querySelectorAll('.lap-btn').forEach(b => b.addEventListener('click', e => {
+        document.querySelectorAll('.lap-btn').forEach(x => x.classList.remove('active'));
+        e.target.classList.add('active');
+        selectedLapDist = parseInt(e.target.dataset.lap);
+        document.getElementById('lap-label').textContent = selectedLapDist + 'м';
+        calcPace();
+    }));
+
     calcPace();
 }
 
@@ -603,11 +614,11 @@ function calcPace() {
     const speed = distKm / (totalSec / 3600);
     document.getElementById('result-speed').textContent = speed.toFixed(1);
 
-    // Время на 400м круг
-    const lap400Sec = paceSec * 0.4;
-    const lapMin = Math.floor(lap400Sec / 60);
-    const lapSec = Math.round(lap400Sec % 60);
-    document.getElementById('result-lap').textContent = lapMin + ':' + pad(lapSec);
+    // Время на дистанцию круга (200/400/800м)
+    const lapSec = paceSec * (selectedLapDist / 1000);
+    const lapMin = Math.floor(lapSec / 60);
+    const lapRem = Math.round(lapSec % 60);
+    document.getElementById('result-lap').textContent = lapMin + ':' + pad(lapRem);
 
     // Раскладка по километрам
     renderSplits(distKm, paceSec);
