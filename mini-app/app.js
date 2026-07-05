@@ -91,6 +91,12 @@ function useStartForManual() {
 
     showConfirmModal('Начать маршрут от текущей точки?').then(confirmed => {
         if (confirmed) {
+            // Убираем автомаршрут и маркер — оставляем только точку
+            if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+            if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+            currentRoute = null;
+            document.getElementById('route-info').classList.add('hidden');
+
             addManualPoint(userLocation.lat, userLocation.lng);
             const hint = document.getElementById('hint-manual');
             hint.textContent = 'Точка старта добавлена. Кликните чтобы поставить вторую точку';
