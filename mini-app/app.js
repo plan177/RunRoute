@@ -153,6 +153,7 @@ function clearManualMode() {
     document.getElementById('generate-btn').disabled = true;
     document.getElementById('regenerate-btn').classList.add('hidden');
     document.getElementById('download-btn').classList.add('hidden');
+    document.getElementById('share-row').classList.add('hidden');
     document.getElementById('route-info').classList.add('hidden');
     updateManualCount();
 }
@@ -507,6 +508,7 @@ async function generateManualRoute() {
 function showRouteButtons() {
     document.getElementById('regenerate-btn').classList.remove('hidden');
     document.getElementById('download-btn').classList.remove('hidden');
+    document.getElementById('share-row').classList.remove('hidden');
     document.getElementById('route-info').classList.remove('hidden');
 }
 
@@ -690,6 +692,122 @@ function formatTime(totalSec) {
 
 function pad(n) { return n < 10 ? '0' + n : '' + n; }
 
+// === Share ===
+
+function initShare() {
+    document.getElementById('share-btn').addEventListener('click', shareToTelegram);
+    document.getElementById('copy-link-btn').addEventListener('click', copyRouteLink);
+}
+
+function shareToTelegram() {
+    if (!currentRoute) return;
+
+    const dist = currentRoute.distance_km.toFixed(1);
+    const text = '🏃 Маршрут ' + dist + ' км — построен в RunRouteBot';
+    const link = buildShareUrl();
+
+    if (window.Telegram && Telegram.WebApp && Telegram.WebApp.switchInlineQuery) {
+        // Открывает выбор чата для отправки
+        Telegram.WebApp.switchInlineQuery(text + '\n' + link, ['users', 'groups', 'channels']);
+    } else if (navigator.share) {
+        // Мобильный Web Share API (fallback)
+        navigator.share({ title: 'RunRouteBot', text: text, url: link }).catch(() => {});
+    } else {
+        // Десктоп — копируем в буфер
+        copyToClipboard(text + '\n' + link);
+        showToast('Текст скопирован — вставьте в чат');
+    }
+}
+
+function copyRouteLink() {
+    if (!currentRoute) return;
+    const link = buildShareUrl();
+    copyToClipboard(link);
+    showToast('Ссылка скопирована!');
+}
+
+function buildShareUrl() {
+    if (!currentRoute) return '';
+    // Кодируем ключевые точки маршрута (до 100 точек для компактности)
+    const pts = currentRoute.points;
+    const step = Math.max(1, Math.floor(pts.length / 100));
+    const sampled = [];
+    for (let i = 0; i < pts.length; i += step) {
+        sampled.push(pts[i]);
+    }
+    // Всегда включаем последнюю точку
+    if (sampled[sampled.length - 1] !== pts[pts.length - 1]) {
+        sampled.push(pts[pts.length - 1]);
+    }
+
+    const data = {
+        d: parseFloat(currentRoute.distance_km.toFixed(2)),
+        p: sampled.map(p => [parseFloat(p.lat.toFixed(5)), parseFloat(p.lng.toFixed(5))])
+    };
+
+    const encoded = btoa(JSON.stringify(data));
+    const base = window.location.origin + window.location.pathname;
+    return base + '#route=' + encoded;
+}
+
+function loadRouteFromUrl() {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#route=')) return false;
+
+    try {
+        const encoded = hash.slice(7);
+        const data = JSON.parse(atob(encoded));
+
+        if (!data.p || data.p.length < 2) return false;
+
+        const points = data.p.map(p => ({ lat: p[0], lng: p[1] }));
+        const distance_km = data.d || haversineArr(points);
+
+        currentRoute = {
+            points,
+            distance_km,
+            gpx: makeGPX(points, 'Shared Route ' + distance_km.toFixed(1) + 'km')
+        };
+
+        displayRoute(currentRoute);
+        showRouteButtons();
+
+        // Центрируем карту
+        map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
+
+        return true;
+    } catch (e) {
+        console.error('Failed to load route from URL:', e);
+        return false;
+    }
+}
+
+function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+    } else {
+        fallbackCopy(text);
+    }
+}
+
+function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+}
+
+function showToast(msg) {
+    const el = document.getElementById('share-toast');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 2000);
+}
+
 // === Init all ===
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -700,5 +818,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initRouteMode();
     initPace();
     initTelegram();
+    initShare();
     updateUIForMode();
+    loadRouteFromUrl();
 });
