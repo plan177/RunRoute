@@ -1,5 +1,6 @@
 # Secrets
 .env
+.env.example
 
 # Claude Code
 .claude/
@@ -12,6 +13,14 @@ graphify-out/
 
 # Documentation
 README.md
+docs/
+
+# Bot & scripts
+bot.py
+run-bot.bat
+start-dev.bat
+start.bat
+stop.bat
 
 # Python
 __pycache__/

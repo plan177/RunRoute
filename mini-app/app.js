@@ -70,6 +70,7 @@ function initRouteMode() {
         updateUIForMode();
     }));
     document.getElementById('clear-manual-btn').addEventListener('click', clearManualMode);
+    document.getElementById('undo-manual-btn').addEventListener('click', undoLastPoint);
 }
 
 function updateUIForMode() {
@@ -100,24 +101,74 @@ function updateManualCount() {
 }
 
 function addManualPoint(lat, lng) {
+    const idx = manualPoints.length;
     manualPoints.push({ lat, lng });
     const marker = L.marker([lat, lng], {
         icon: L.divIcon({
             className: 'waypoint-marker',
-            html: '<div style="background:#58a6ff;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);">' + manualPoints.length + '</div>',
-            iconSize: [22, 22], iconAnchor: [11, 11]
+            html: '<div class="manual-marker" data-idx="' + idx + '">' +
+                  '<span class="manual-marker-num">' + (idx + 1) + '</span>' +
+                  '<span class="manual-marker-del" data-idx="' + idx + '">&times;</span>' +
+                  '</div>',
+            iconSize: [28, 28], iconAnchor: [14, 14]
         })
     }).addTo(map);
-    manualMarkers.push(marker);
 
+    marker.on('click', function(e) {
+        L.DomEvent.stop(e);
+        removeManualPoint(idx);
+    });
+
+    manualMarkers.push(marker);
+    redrawManualPolyline();
+    updateManualCount();
+    document.getElementById('generate-btn').disabled = manualPoints.length < 2;
+}
+
+function removeManualPoint(idx) {
+    if (idx < 0 || idx >= manualPoints.length) return;
+    manualPoints.splice(idx, 1);
+    map.removeLayer(manualMarkers[idx]);
+    manualMarkers.splice(idx, 1);
+    renumberMarkers();
+    redrawManualPolyline();
+    updateManualCount();
+    document.getElementById('generate-btn').disabled = manualPoints.length < 2;
+    if (manualPoints.length === 0) {
+        document.getElementById('generate-btn').disabled = true;
+    }
+}
+
+function undoLastPoint() {
+    if (manualPoints.length === 0) return;
+    removeManualPoint(manualPoints.length - 1);
+}
+
+function renumberMarkers() {
+    manualMarkers.forEach((m, i) => {
+        m.setIcon(L.divIcon({
+            className: 'waypoint-marker',
+            html: '<div class="manual-marker" data-idx="' + i + '">' +
+                  '<span class="manual-marker-num">' + (i + 1) + '</span>' +
+                  '<span class="manual-marker-del" data-idx="' + i + '">&times;</span>' +
+                  '</div>',
+            iconSize: [28, 28], iconAnchor: [14, 14]
+        }));
+        m.off('click');
+        m.on('click', function(e) {
+            L.DomEvent.stop(e);
+            removeManualPoint(i);
+        });
+    });
+}
+
+function redrawManualPolyline() {
     if (manualPolyline) map.removeLayer(manualPolyline);
+    if (manualPoints.length < 2) { manualPolyline = null; return; }
     manualPolyline = L.polyline(
         manualPoints.map(p => [p.lat, p.lng]),
         { color: '#58a6ff', weight: 3, dashArray: '8,6', opacity: 0.8 }
     ).addTo(map);
-
-    updateManualCount();
-    document.getElementById('generate-btn').disabled = manualPoints.length < 2;
 }
 
 // === Search ===
