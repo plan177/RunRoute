@@ -84,6 +84,7 @@ function initRouteMode() {
     }));
     document.getElementById('clear-manual-btn').addEventListener('click', clearManualMode);
     document.getElementById('undo-manual-btn').addEventListener('click', undoLastPoint);
+    document.getElementById('close-route-btn').addEventListener('click', closeManualRoute);
 }
 
 function useStartForManual() {
@@ -164,6 +165,16 @@ function clearManualMode() {
 function updateManualCount() {
     const el = document.getElementById('manual-count');
     if (el) el.textContent = manualPoints.length + ' точек';
+    // Показываем кнопку "Замкнуть" если 2+ точек
+    const closeBtn = document.getElementById('close-route-btn');
+    closeBtn.classList.toggle('hidden', manualPoints.length < 2);
+}
+
+function closeManualRoute() {
+    if (manualPoints.length < 2) return;
+    // Добавляем первую точку в конец для замыкания
+    const first = manualPoints[0];
+    addManualPoint(first.lat, first.lng);
 }
 
 function addManualPoint(lat, lng) {
