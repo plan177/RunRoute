@@ -75,6 +75,12 @@
             <div class="pace-calc">
                 <div class="pace-field">
                     <label>Дистанция</label>
+                    <div class="time-inputs pace-dist-inputs">
+                        <input type="number" id="pace-dist-km" min="0" max="100" value="5" class="time-input" />
+                        <span class="time-sep">км</span>
+                        <input type="number" id="pace-dist-m" min="0" max="900" step="100" value="0" class="time-input" />
+                        <span class="time-sep">м</span>
+                    </div>
                     <div class="dist-buttons-pace">
                         <button class="dp-btn" data-dist="1000">1 км</button>
                         <button class="dp-btn" data-dist="3000">3 км</button>
