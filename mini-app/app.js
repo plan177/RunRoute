@@ -91,11 +91,14 @@ function useStartForManual() {
 
     showConfirmModal('Начать маршрут от текущей точки?').then(confirmed => {
         if (confirmed) {
-            // Убираем автомаршрут и маркер — оставляем только точку
+            // Убираем автомаршрут, маркер и все кнопки маршрута
             if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
             if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
             currentRoute = null;
             document.getElementById('route-info').classList.add('hidden');
+            document.getElementById('regenerate-btn').classList.add('hidden');
+            document.getElementById('download-btn').classList.add('hidden');
+            document.getElementById('share-row').classList.add('hidden');
 
             addManualPoint(userLocation.lat, userLocation.lng);
             const hint = document.getElementById('hint-manual');
