@@ -695,35 +695,34 @@ function pad(n) { return n < 10 ? '0' + n : '' + n; }
 // === Share ===
 
 function initShare() {
-    document.getElementById('share-btn').addEventListener('click', shareToTelegram);
-    document.getElementById('copy-link-btn').addEventListener('click', copyRouteLink);
+    document.getElementById('share-btn').addEventListener('click', shareRoute);
 }
 
-function shareToTelegram() {
-    if (!currentRoute) return;
+async function shareRoute() {
+    if (!currentRoute || !currentRoute.gpx) return;
 
     const dist = currentRoute.distance_km.toFixed(1);
-    const text = '🏃 Маршрут ' + dist + ' км — построен в RunRouteBot';
-    const link = buildShareUrl();
+    const fileName = 'route_' + dist + 'km.gpx';
+    const file = new File([currentRoute.gpx], fileName, { type: 'application/gpx+xml' });
 
-    if (window.Telegram && Telegram.WebApp && Telegram.WebApp.switchInlineQuery) {
-        // Открывает выбор чата для отправки
-        Telegram.WebApp.switchInlineQuery(text + '\n' + link, ['users', 'groups', 'channels']);
-    } else if (navigator.share) {
-        // Мобильный Web Share API (fallback)
-        navigator.share({ title: 'RunRouteBot', text: text, url: link }).catch(() => {});
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+            await navigator.share({
+                files: [file],
+                title: 'Маршрут ' + dist + ' км',
+                text: '🏃 Маршрут ' + dist + ' км — RunRouteBot'
+            });
+            showToast('Маршрут отправлен');
+        } catch (e) {
+            if (e.name !== 'AbortError') {
+                downloadGPX();
+                showToast('GPX скачан');
+            }
+        }
     } else {
-        // Десктоп — копируем в буфер
-        copyToClipboard(text + '\n' + link);
-        showToast('Текст скопирован — вставьте в чат');
+        downloadGPX();
+        showToast('GPX скачан — отправьте файл вручную');
     }
-}
-
-function copyRouteLink() {
-    if (!currentRoute) return;
-    const link = buildShareUrl();
-    copyToClipboard(link);
-    showToast('Ссылка скопирована!');
 }
 
 function buildShareUrl() {
