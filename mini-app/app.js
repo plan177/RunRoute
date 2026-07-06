@@ -13,7 +13,6 @@ function initTelegram() {
     if (window.Telegram && window.Telegram.WebApp) {
         Telegram.WebApp.ready();
         Telegram.WebApp.expand();
-        // Fix iOS touch issues
         if (Telegram.WebApp.platform === 'ios') {
             document.body.style.webkitOverflowScrolling = 'touch';
         }
@@ -35,9 +34,10 @@ function initMap() {
 
 function initTabs() {
     document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', e => {
+        const tab = e.target.closest('.tab');
         document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-        e.target.classList.add('active');
-        const isRoute = e.target.dataset.tab === 'route';
+        tab.classList.add('active');
+        const isRoute = tab.dataset.tab === 'route';
         document.getElementById('tab-route').classList.toggle('hidden', !isRoute);
         document.getElementById('tab-pace').classList.toggle('hidden', isRoute);
         document.getElementById('map').classList.toggle('hidden', !isRoute);
@@ -54,7 +54,7 @@ function onMapClick(e) {
     setStartMarker(userLocation.lat, userLocation.lng);
     map.setView([userLocation.lat, userLocation.lng], 15);
     document.getElementById('location-status').textContent =
-        'Старт/финиш: ' + userLocation.lat.toFixed(5) + ', ' + userLocation.lng.toFixed(5);
+        userLocation.lat.toFixed(5) + ', ' + userLocation.lng.toFixed(5);
     document.getElementById('location-status').className = 'status success';
     document.getElementById('generate-btn').disabled = false;
 }
@@ -64,27 +64,25 @@ function setStartMarker(lat, lng) {
     startMarker = L.marker([lat, lng], {
         icon: L.divIcon({
             className: 'waypoint-marker',
-            html: '<div class="start-finish-marker" title="Старт / Финиш">' +
-                  '<span>▶</span><span>◀</span>' +
-                  '</div>',
-            iconSize: [32, 32], iconAnchor: [16, 16]
+            html: '<div class="start-finish-marker" title="Старт / Финиш">▶◀</div>',
+            iconSize: [36, 36], iconAnchor: [18, 18]
         })
     }).addTo(map);
-    startMarker.bindTooltip('Старт / Финиш', { permanent: true, direction: 'top', offset: [0, -18] });
+    startMarker.bindTooltip('Старт / Финиш', { permanent: true, direction: 'top', offset: [0, -20] });
 }
 
 // === Route Mode Switch ===
 
 function initRouteMode() {
     document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', e => {
+        const btn = e.target.closest('.mode-btn');
         document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
-        e.target.classList.add('active');
-        const newMode = e.target.dataset.mode;
+        btn.classList.add('active');
+        const newMode = btn.dataset.mode;
         const prevMode = routeMode;
         routeMode = newMode;
 
         if (newMode === 'manual' && prevMode === 'auto' && userLocation && !manualPoints.length) {
-            // Переключение сАвто на ручной — предлагаем начать от старта
             useStartForManual();
         } else {
             clearManualMode();
@@ -101,7 +99,6 @@ function useStartForManual() {
 
     showConfirmModal('Начать маршрут от текущей точки?').then(confirmed => {
         if (confirmed) {
-            // Убираем автомаршрут, маркер и все кнопки маршрута
             if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
             if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
             currentRoute = null;
@@ -112,7 +109,7 @@ function useStartForManual() {
 
             addManualPoint(userLocation.lat, userLocation.lng);
             const hint = document.getElementById('hint-manual');
-            hint.textContent = 'Точка старта добавлена. Кликните чтобы поставить вторую точку';
+            hint.textContent = 'Точка старта добавлена. Нажмите чтобы поставить вторую';
             hint.classList.remove('hidden');
         } else {
             clearManualMode();
@@ -153,7 +150,7 @@ function updateUIForMode() {
     document.getElementById('auto-controls').classList.toggle('hidden', !isAuto);
     document.getElementById('manual-controls').classList.toggle('hidden', isAuto);
     document.getElementById('hint-auto').classList.toggle('hidden', !isAuto);
-    document.getElementById('hint-manual').classList.toggle('hidden', isAuto);
+    document.getElementById('hint-manual').classList.add('hidden');
 }
 
 function clearManualMode() {
@@ -172,18 +169,10 @@ function clearManualMode() {
 }
 
 function updateManualCount() {
-    const el = document.getElementById('manual-count');
+    const el = document.getElementById('manual-count-text');
     if (el) el.textContent = manualPoints.length + ' точек';
-    // Показываем кнопку "Замкнуть" если 2+ точек
     const closeBtn = document.getElementById('close-route-btn');
     closeBtn.classList.toggle('hidden', manualPoints.length < 2);
-}
-
-function closeManualRoute() {
-    if (manualPoints.length < 2) return;
-    // Добавляем первую точку в конец для замыкания
-    const first = manualPoints[0];
-    addManualPoint(first.lat, first.lng);
 }
 
 function addManualPoint(lat, lng) {
@@ -196,7 +185,7 @@ function addManualPoint(lat, lng) {
                   '<span class="manual-marker-num">' + (idx + 1) + '</span>' +
                   '<span class="manual-marker-del" data-idx="' + idx + '">&times;</span>' +
                   '</div>',
-            iconSize: [28, 28], iconAnchor: [14, 14]
+            iconSize: [30, 30], iconAnchor: [15, 15]
         })
     }).addTo(map);
 
@@ -209,7 +198,6 @@ function addManualPoint(lat, lng) {
     redrawManualPolyline();
     updateManualCount();
 
-    // Скрываем хинт после добавления точки
     const hint = document.getElementById('hint-manual');
     if (manualPoints.length >= 2) {
         hint.classList.add('hidden');
@@ -245,7 +233,7 @@ function renumberMarkers() {
                   '<span class="manual-marker-num">' + (i + 1) + '</span>' +
                   '<span class="manual-marker-del" data-idx="' + i + '">&times;</span>' +
                   '</div>',
-            iconSize: [28, 28], iconAnchor: [14, 14]
+            iconSize: [30, 30], iconAnchor: [15, 15]
         }));
         m.off('click');
         m.on('click', function(e) {
@@ -260,8 +248,14 @@ function redrawManualPolyline() {
     if (manualPoints.length < 2) { manualPolyline = null; return; }
     manualPolyline = L.polyline(
         manualPoints.map(p => [p.lat, p.lng]),
-        { color: '#58a6ff', weight: 3, dashArray: '8,6', opacity: 0.8 }
+        { color: '#39FF14', weight: 3, dashArray: '8,6', opacity: 0.8 }
     ).addTo(map);
+}
+
+function closeManualRoute() {
+    if (manualPoints.length < 2) return;
+    const first = manualPoints[0];
+    addManualPoint(first.lat, first.lng);
 }
 
 // === Search ===
@@ -340,10 +334,11 @@ function initRouteControls() {
     document.getElementById('generate-btn').addEventListener('click', generateRoute);
     document.getElementById('regenerate-btn').addEventListener('click', regenerateRoute);
     document.getElementById('download-btn').addEventListener('click', downloadGPX);
-    document.querySelectorAll('.dist-btn').forEach(b => b.addEventListener('click', e => {
-        document.querySelectorAll('.dist-btn').forEach(x => x.classList.remove('active'));
-        e.target.classList.add('active');
-        selectedDistance = parseFloat(e.target.dataset.distance);
+    document.querySelectorAll('.distance-chips .chip[data-distance]').forEach(b => b.addEventListener('click', e => {
+        const chip = e.target.closest('.chip');
+        document.querySelectorAll('.distance-chips .chip[data-distance]').forEach(x => x.classList.remove('active'));
+        chip.classList.add('active');
+        selectedDistance = parseFloat(chip.dataset.distance);
     }));
 }
 
@@ -359,17 +354,16 @@ function regenerateRoute() {
     if (routeMode === 'manual') {
         generateManualRoute();
     } else {
-        regenerateAutoRoute();
+        routeSeed++;
+        generateAutoRoute();
     }
 }
-
-// --- Auto mode ---
 
 async function generateAutoRoute() {
     if (!userLocation) return;
     const btn = document.getElementById('generate-btn');
     btn.disabled = true;
-    btn.textContent = 'Построение...';
+    btn.innerHTML = '<span class="loading"></span> Построение...';
     try {
         currentRoute = await buildPreciseRoute(userLocation.lat, userLocation.lng, selectedDistance);
         displayRoute(currentRoute);
@@ -378,22 +372,17 @@ async function generateAutoRoute() {
         console.error(e);
         alert('Не удалось построить маршрут. Попробуйте другую точку.');
     } finally {
-        btn.textContent = 'Построить маршрут';
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg> Построить маршрут';
         btn.disabled = false;
     }
 }
 
-function regenerateAutoRoute() {
-    routeSeed++;
-    generateAutoRoute();
-}
-
 async function buildPreciseRoute(lat, lng, targetKm) {
     const MAX_ITERATIONS = 15;
-    const TOLERANCE_KM = 0.1; // 100 метров — достаточно для бега
+    const TOLERANCE_KM = 0.1;
     let bestRoute = null;
     let bestDiff = Infinity;
-    let radiusKm = targetKm / (2 * Math.PI); // начальный радиус
+    let radiusKm = targetKm / (2 * Math.PI);
 
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
         const route = await tryBuildTrip(lat, lng, radiusKm);
@@ -409,8 +398,6 @@ async function buildPreciseRoute(lat, lng, targetKm) {
         }
 
         if (diff <= TOLERANCE_KM) break;
-
-        // Корректируем радиус пропорционально ошибке
         radiusKm *= targetKm / route.distance_km;
     }
 
@@ -430,12 +417,9 @@ async function tryBuildTrip(lat, lng, radiusKm) {
     const rLat = radiusKm * latDegPerKm;
     const rLng = radiusKm * lngDegPerKm;
 
-    // Сдвиг угла на основе seed для вариативности при перегенерации
     const angleOffset = (routeSeed * 0.7) % (2 * Math.PI);
-
-    // 8 waypoints — достаточно для чистого круга, без петель
     const numPts = 8;
-    const waypoints = [[lng, lat]]; // старт
+    const waypoints = [[lng, lat]];
     for (let i = 0; i < numPts; i++) {
         const angle = angleOffset + (2 * Math.PI * i) / numPts;
         waypoints.push([
@@ -443,24 +427,19 @@ async function tryBuildTrip(lat, lng, radiusKm) {
             lat + rLat * Math.sin(angle)
         ]);
     }
-    waypoints.push([lng, lat]); // финиш = старт
+    waypoints.push([lng, lat]);
 
     const coords = waypoints.map(p => p[0].toFixed(6) + ',' + p[1].toFixed(6)).join(';');
-
-    // OSRM route — следует порядку точек, без петель
     const url = 'https://router.project-osrm.org/route/v1/foot/' + coords +
         '?overview=full&geometries=geojson&steps=false';
 
     try {
         const resp = await fetch(url);
         const data = await resp.json();
-
         if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) return null;
-
         const route = data.routes[0];
         const points = route.geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
         const distance_km = haversineArr(points);
-
         return { points, distance_km };
     } catch {
         return null;
@@ -476,7 +455,7 @@ function buildPerfectCircle(lat, lng, targetKm) {
     const rLng = radiusKm * lngDegPerKm;
     const angleOffset = (routeSeed * 0.7) % (2 * Math.PI);
 
-    const points = [{ lat, lng }]; // старт/финиш
+    const points = [{ lat, lng }];
     for (let i = 0; i <= numPts; i++) {
         const angle = angleOffset + (2 * Math.PI * i) / numPts;
         points.push({
@@ -484,7 +463,7 @@ function buildPerfectCircle(lat, lng, targetKm) {
             lng: lng + rLng * Math.cos(angle)
         });
     }
-    points.push({ lat, lng }); // замыкаем в старт
+    points.push({ lat, lng });
 
     const distance_km = haversineArr(points);
     return { points, distance_km };
@@ -496,7 +475,7 @@ async function generateManualRoute() {
     if (manualPoints.length < 2) return;
     const btn = document.getElementById('generate-btn');
     btn.disabled = true;
-    btn.textContent = 'Построение...';
+    btn.innerHTML = '<span class="loading"></span> Построение...';
 
     try {
         const coords = manualPoints.map(p => p.lng.toFixed(6) + ',' + p.lat.toFixed(6)).join(';');
@@ -515,7 +494,6 @@ async function generateManualRoute() {
         const points = route.geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
         const distance_km = haversineArr(points);
 
-        // Убираем пунктирную линию
         if (manualPolyline) { map.removeLayer(manualPolyline); manualPolyline = null; }
 
         currentRoute = {
@@ -531,7 +509,7 @@ async function generateManualRoute() {
         console.error(e);
         alert('Ошибка построения маршрута.');
     } finally {
-        btn.textContent = 'Построить маршрут';
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg> Построить маршрут';
         btn.disabled = false;
     }
 }
@@ -547,7 +525,7 @@ function displayRoute(route) {
     if (routeLayer) map.removeLayer(routeLayer);
     routeLayer = L.polyline(
         route.points.map(p => [p.lat, p.lng]),
-        { color: '#3fb950', weight: 4, opacity: 0.9 }
+        { color: '#39FF14', weight: 4, opacity: 0.9 }
     ).addTo(map);
     map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
 
@@ -556,39 +534,36 @@ function displayRoute(route) {
     if (route.accuracy !== undefined) {
         const acc = route.accuracy;
         accEl.textContent = '±' + acc.toFixed(1) + '%';
-        accEl.style.color = acc < 1 ? '#3fb950' : acc < 5 ? '#d29922' : '#f85149';
+        accEl.style.color = acc < 1 ? '#39FF14' : acc < 5 ? '#FFD700' : '#FF3B5C';
     } else {
         accEl.textContent = 'точный';
-        accEl.style.color = '#3fb950';
+        accEl.style.color = '#39FF14';
     }
 }
 
 // === Pace Calculator ===
 
 function initPace() {
-    // Preset buttons
-    document.querySelectorAll('.dp-btn').forEach(b => b.addEventListener('click', e => {
-        document.querySelectorAll('.dp-btn').forEach(x => x.classList.remove('active'));
-        e.target.classList.add('active');
-        selectedPaceDist = parseInt(e.target.dataset.dist);
+    document.querySelectorAll('.distance-chips .chip[data-dist]').forEach(b => b.addEventListener('click', e => {
+        const chip = e.target.closest('.chip');
+        document.querySelectorAll('.distance-chips .chip[data-dist]').forEach(x => x.classList.remove('active'));
+        chip.classList.add('active');
+        selectedPaceDist = parseInt(chip.dataset.dist);
         updatePaceDistInputs();
         calcPace();
     }));
 
-    // Custom distance inputs
     document.getElementById('pace-dist-km').addEventListener('input', onPaceDistInput);
     document.getElementById('pace-dist-m').addEventListener('input', onPaceDistInput);
-
-    // Time inputs
     document.getElementById('pace-h').addEventListener('input', calcPace);
     document.getElementById('pace-m').addEventListener('input', calcPace);
     document.getElementById('pace-s').addEventListener('input', calcPace);
 
-    // Lap distance switcher
-    document.querySelectorAll('.lap-btn').forEach(b => b.addEventListener('click', e => {
-        document.querySelectorAll('.lap-btn').forEach(x => x.classList.remove('active'));
-        e.target.classList.add('active');
-        selectedLapDist = parseInt(e.target.dataset.lap);
+    document.querySelectorAll('.lap-tab').forEach(b => b.addEventListener('click', e => {
+        const tab = e.target.closest('.lap-tab');
+        document.querySelectorAll('.lap-tab').forEach(x => x.classList.remove('active'));
+        tab.classList.add('active');
+        selectedLapDist = parseInt(tab.dataset.lap);
         document.getElementById('lap-label').textContent = selectedLapDist + 'м';
         calcPace();
     }));
@@ -600,7 +575,7 @@ function onPaceDistInput() {
     const km = parseInt(document.getElementById('pace-dist-km').value) || 0;
     const m = parseInt(document.getElementById('pace-dist-m').value) || 0;
     selectedPaceDist = km * 1000 + m;
-    document.querySelectorAll('.dp-btn').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.distance-chips .chip[data-dist]').forEach(x => x.classList.remove('active'));
     calcPace();
 }
 
@@ -619,24 +594,19 @@ function calcPace() {
     if (totalSec <= 0 || selectedPaceDist <= 0) return;
 
     const distKm = selectedPaceDist / 1000;
-
-    // Темп: мин/км
     const paceSec = totalSec / distKm;
     const paceMin = Math.floor(paceSec / 60);
     const paceRem = Math.round(paceSec % 60);
     document.getElementById('result-pace').textContent = paceMin + ':' + pad(paceRem);
 
-    // Скорость: км/ч
     const speed = distKm / (totalSec / 3600);
     document.getElementById('result-speed').textContent = speed.toFixed(1);
 
-    // Время на дистанцию круга (200/400/800м)
     const lapSec = paceSec * (selectedLapDist / 1000);
     const lapMin = Math.floor(lapSec / 60);
     const lapRem = Math.round(lapSec % 60);
     document.getElementById('result-lap').textContent = lapMin + ':' + pad(lapRem);
 
-    // Раскладка по километрам
     renderSplits(distKm, paceSec);
 }
 
@@ -762,63 +732,7 @@ async function shareRoute() {
         }
     } else {
         downloadGPX();
-        showToast('GPX скачан — отправьте файл вручную');
-    }
-}
-
-function buildShareUrl() {
-    if (!currentRoute) return '';
-    // Кодируем ключевые точки маршрута (до 100 точек для компактности)
-    const pts = currentRoute.points;
-    const step = Math.max(1, Math.floor(pts.length / 100));
-    const sampled = [];
-    for (let i = 0; i < pts.length; i += step) {
-        sampled.push(pts[i]);
-    }
-    // Всегда включаем последнюю точку
-    if (sampled[sampled.length - 1] !== pts[pts.length - 1]) {
-        sampled.push(pts[pts.length - 1]);
-    }
-
-    const data = {
-        d: parseFloat(currentRoute.distance_km.toFixed(2)),
-        p: sampled.map(p => [parseFloat(p.lat.toFixed(5)), parseFloat(p.lng.toFixed(5))])
-    };
-
-    const encoded = btoa(JSON.stringify(data));
-    const base = window.location.origin + window.location.pathname;
-    return base + '#route=' + encoded;
-}
-
-function loadRouteFromUrl() {
-    const hash = window.location.hash;
-    if (!hash.startsWith('#route=')) return false;
-
-    try {
-        const encoded = hash.slice(7);
-        const data = JSON.parse(atob(encoded));
-
-        if (!data.p || data.p.length < 2) return false;
-
-        const points = data.p.map(p => ({ lat: p[0], lng: p[1] }));
-        const distance_km = data.d || haversineArr(points);
-
-        currentRoute = {
-            points,
-            distance_km,
-            gpx: makeGPX(points, 'Shared Route ' + distance_km.toFixed(1) + 'km')
-        };
-
-        displayRoute(currentRoute);
-        showRouteButtons();
-
-        // Центрируем карту
-        map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
-
-        return true;
-    } catch (e) {
-        console.error('Failed to load route from URL:', e);
-        return false;
+        showToast('GPX скачан');
     }
 }
 
@@ -845,7 +759,7 @@ function showToast(msg) {
     const el = document.getElementById('share-toast');
     el.textContent = msg;
     el.classList.remove('hidden');
-    setTimeout(() => el.classList.add('hidden'), 2000);
+    setTimeout(() => el.classList.add('hidden'), 2500);
 }
 
 // === Init all ===
@@ -860,5 +774,4 @@ document.addEventListener('DOMContentLoaded', () => {
     initTelegram();
     initShare();
     updateUIForMode();
-    loadRouteFromUrl();
 });
