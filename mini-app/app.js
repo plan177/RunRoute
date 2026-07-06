@@ -660,14 +660,28 @@ function haversine(lat1, lng1, lat2, lng2) {
 }
 
 function makeGPX(points, name) {
+    const now = new Date().toISOString();
     let gpx = '<?xml version="1.0" encoding="UTF-8"?>\n';
-    gpx += '<gpx version="1.1" creator="RunRouteBot" xmlns="http://www.topografix.com/GPX/1/1">\n';
+    gpx += '<gpx version="1.1" creator="RunRouteBot" ';
+    gpx += 'xmlns="http://www.topografix.com/GPX/1/1" ';
+    gpx += 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ';
+    gpx += 'xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">\n';
+    gpx += '  <metadata>\n';
+    gpx += '    <name>' + escapeXml(name) + '</name>\n';
+    gpx += '    <time>' + now + '</time>\n';
+    gpx += '  </metadata>\n';
     gpx += '  <trk>\n';
     gpx += '    <name>' + escapeXml(name) + '</name>\n';
+    gpx += '    <type>running</type>\n';
     gpx += '    <trkseg>\n';
-    for (const p of points) {
-        gpx += '      <trkpt lat="' + p.lat.toFixed(6) + '" lon="' + p.lng.toFixed(6) +
-            '"><ele>0</ele></trkpt>\n';
+    for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        const offset = i * 5;
+        const t = new Date(Date.now() + offset * 1000).toISOString();
+        gpx += '      <trkpt lat="' + p.lat.toFixed(6) + '" lon="' + p.lng.toFixed(6) + '">\n';
+        gpx += '        <ele>0</ele>\n';
+        gpx += '        <time>' + t + '</time>\n';
+        gpx += '      </trkpt>\n';
     }
     gpx += '    </trkseg>\n';
     gpx += '  </trk>\n';
