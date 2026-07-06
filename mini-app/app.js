@@ -544,6 +544,13 @@ function displayRoute(route) {
 // === Pace Calculator ===
 
 function initPace() {
+    // Auto-select on focus for all number inputs
+    document.querySelectorAll('.num-input').forEach(input => {
+        input.addEventListener('focus', () => {
+            setTimeout(() => input.select(), 0);
+        });
+    });
+
     document.querySelectorAll('.distance-chips .chip[data-dist]').forEach(b => b.addEventListener('click', e => {
         const chip = e.target.closest('.chip');
         document.querySelectorAll('.distance-chips .chip[data-dist]').forEach(x => x.classList.remove('active'));
