@@ -260,11 +260,114 @@ function closeManualRoute() {
 
 // === Search ===
 
+let searchDebounce = null;
+
 function initSearch() {
+    const input = document.getElementById('address-input');
+    const suggestions = document.getElementById('address-suggestions');
+
     document.getElementById('search-btn').addEventListener('click', searchAddress);
-    document.getElementById('address-input').addEventListener('keypress', e => {
-        if (e.key === 'Enter') searchAddress();
+    input.addEventListener('keypress', e => {
+        if (e.key === 'Enter') {
+            hideSuggestions();
+            searchAddress();
+        }
     });
+
+    // Autocomplete
+    input.addEventListener('input', () => {
+        clearTimeout(searchDebounce);
+        const query = input.value.trim();
+        if (query.length < 3) {
+            hideSuggestions();
+            return;
+        }
+        searchDebounce = setTimeout(() => fetchSuggestions(query), 300);
+    });
+
+    // Hide on outside click
+    document.addEventListener('click', e => {
+        if (!e.target.closest('.search-box')) {
+            hideSuggestions();
+        }
+    });
+
+    // Hide on blur (with delay for click)
+    input.addEventListener('blur', () => {
+        setTimeout(hideSuggestions, 200);
+    });
+}
+
+function fetchSuggestions(query) {
+    const suggestions = document.getElementById('address-suggestions');
+
+    fetch('https://nominatim.openstreetmap.org/search?' +
+        new URLSearchParams({ format: 'json', q: query, limit: 5, 'accept-language': 'ru' }),
+        { headers: { 'User-Agent': 'RunRouteBot/1.0' } }
+    )
+    .then(r => r.json())
+    .then(data => {
+        if (!data || data.length === 0) {
+            hideSuggestions();
+            return;
+        }
+
+        let html = '';
+        data.forEach(item => {
+            const parts = item.display_name.split(',').map(s => s.trim());
+            let street = '';
+            let house = '';
+            let city = '';
+            for (const p of parts) {
+                if (/^\d/.test(p) || /корпус|кв|стр|corp/i.test(p)) {
+                    house = house ? house + ' ' + p : p;
+                } else if (!street && /улица|проспект|бульвар|переулок|шоссе|набережная|площадь|проезд/i.test(p)) {
+                    street = p;
+                } else if (!city && p.length > 3) {
+                    city = p;
+                }
+            }
+            const display = [city, street, house].filter(Boolean).join(', ');
+            html += '<div class="suggestion-item" data-lat="' + item.lat + '" data-lon="' + item.lon + '" data-display="' + escapeXml(display) + '">' +
+                '<svg class="suggestion-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>' +
+                '<div class="suggestion-text">' + escapeXml(display) + '</div>' +
+                '</div>';
+        });
+
+        suggestions.innerHTML = html;
+        suggestions.classList.remove('hidden');
+
+        suggestions.querySelectorAll('.suggestion-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const lat = parseFloat(item.dataset.lat);
+                const lon = parseFloat(item.dataset.lon);
+                const display = item.dataset.display;
+                selectSuggestion(lat, lon, display);
+            });
+        });
+    })
+    .catch(() => hideSuggestions());
+}
+
+function selectSuggestion(lat, lon, display) {
+    const input = document.getElementById('address-input');
+    input.value = display;
+    hideSuggestions();
+
+    userLocation = { lat, lng: lon };
+    if (routeMode === 'manual') {
+        addManualPoint(lat, lon);
+    } else {
+        setStartMarker(lat, lon);
+    }
+    map.setView([lat, lon], 15);
+    document.getElementById('location-status').textContent = display;
+    document.getElementById('location-status').className = 'status success';
+    document.getElementById('generate-btn').disabled = false;
+}
+
+function hideSuggestions() {
+    document.getElementById('address-suggestions').classList.add('hidden');
 }
 
 function searchAddress() {

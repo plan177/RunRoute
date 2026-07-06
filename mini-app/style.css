@@ -118,6 +118,8 @@ body {
     gap: 8px;
     margin-bottom: 12px;
     animation: fadeInUp 0.5s ease 0.2s both;
+    position: relative;
+    z-index: 50;
 }
 
 .input-wrapper {
@@ -155,8 +157,75 @@ body {
     min-width: 0;
 }
 
+/* Fix iOS autofill white background */
+.input-wrapper input:-webkit-autofill,
+.input-wrapper input:-webkit-autofill:hover,
+.input-wrapper input:-webkit-autofill:focus,
+.input-wrapper input:-webkit-autofill:active {
+    -webkit-text-fill-color: var(--text) !important;
+    -webkit-box-shadow: 0 0 0 100px var(--surface) inset !important;
+    box-shadow: 0 0 0 100px var(--surface) inset !important;
+    transition: background-color 5000s ease-in-out 0s;
+}
+
 .input-wrapper input::placeholder {
     color: var(--text-secondary);
+}
+
+/* Address suggestions */
+.suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 60px;
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    margin-top: 4px;
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(20px);
+}
+
+.suggestion-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.suggestion-item:hover {
+    background: var(--glass);
+}
+
+.suggestion-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--primary);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.suggestion-text {
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.4;
+}
+
+.suggestion-text small {
+    display: block;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 2px;
 }
 
 .btn-search {
