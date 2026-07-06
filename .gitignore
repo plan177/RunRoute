@@ -1,6 +1,5 @@
 # Secrets
 .env
-.env.example
 
 # Claude Code
 .claude/
