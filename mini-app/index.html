@@ -17,7 +17,7 @@
         <header class="header">
             <div class="logo">
                 <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
                 </svg>
                 <h1>RunRoute</h1>
             </div>
@@ -26,14 +26,15 @@
         <div class="tabs">
             <button class="tab active" data-tab="route">
                 <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <polyline points="12 6 12 12 16 14"/>
+                    <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
+                    <line x1="8" y1="2" x2="8" y2="18"/>
+                    <line x1="16" y1="6" x2="16" y2="22"/>
                 </svg>
                 Маршрут
             </button>
             <button class="tab" data-tab="pace">
                 <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
                 </svg>
                 Темп
             </button>
@@ -61,15 +62,15 @@
             <div class="mode-section">
                 <button class="mode-btn active" data-mode="auto">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M5 12h14"/>
-                        <path d="m12 5 7 7-7 7"/>
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 6v6l4 2"/>
                     </svg>
                     Авто
                 </button>
                 <button class="mode-btn" data-mode="manual">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 19V5"/>
-                        <path d="m5 12 7-7 7 7"/>
+                        <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                        <path d="m15 5 4 4"/>
                     </svg>
                     Вручную
                 </button>
@@ -88,7 +89,8 @@
                 </div>
                 <div id="hint-auto" class="hint">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M15 10l-4 4l6 6l4-16l-18 7l4 2l2 6l3-4"/>
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                        <circle cx="12" cy="10" r="3"/>
                     </svg>
                     Нажмите на карту для точки старта
                 </div>
@@ -138,7 +140,8 @@
             <div class="action-buttons">
                 <button id="generate-btn" class="btn-primary" disabled>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+                        <circle cx="12" cy="12" r="10"/>
+                        <polygon points="10 8 16 12 10 16 10 8"/>
                     </svg>
                     Построить маршрут
                 </button>
