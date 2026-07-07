@@ -872,11 +872,12 @@ body {
 .waypoint-marker { background: none !important; border: none !important; }
 
 .start-finish-marker {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 42px;
     background: var(--primary);
     color: #000;
-    border-radius: 50%;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -888,7 +889,42 @@ body {
     transition: all 0.3s ease;
 }
 
-.start-finish-marker:hover { transform: scale(1.1); }
+.start-finish-marker:hover { transform: rotate(-45deg) scale(1.1); }
+
+.map-pin {
+    width: 32px;
+    height: 42px;
+    position: relative;
+    cursor: pointer;
+    transition: transform 0.3s ease;
+}
+
+.map-pin:hover { transform: scale(1.1); }
+
+.map-pin::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 32px;
+    height: 32px;
+    background: var(--primary);
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    border: 3px solid #fff;
+    box-shadow: 0 0 20px rgba(57, 255, 20, 0.5);
+}
+
+.map-pin-inner {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    z-index: 1;
+}
 
 .manual-marker {
     position: relative;
