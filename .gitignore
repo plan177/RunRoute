@@ -14,13 +14,6 @@ graphify-out/
 README.md
 docs/
 
-# Bot & scripts
-bot.py
-run-bot.bat
-start-dev.bat
-start.bat
-stop.bat
-
 # Python
 __pycache__/
 *.pyc
