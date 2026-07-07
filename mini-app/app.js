@@ -64,11 +64,12 @@ function setStartMarker(lat, lng) {
     startMarker = L.marker([lat, lng], {
         icon: L.divIcon({
             className: 'waypoint-marker',
-            html: '<div class="start-finish-marker" title="Старт / Финиш">▶◀</div>',
-            iconSize: [36, 36], iconAnchor: [18, 18]
+            html: '<div class="map-pin">' +
+                  '<div class="map-pin-inner"></div>' +
+                  '</div>',
+            iconSize: [32, 42], iconAnchor: [16, 42]
         })
     }).addTo(map);
-    startMarker.bindTooltip('Старт / Финиш', { permanent: true, direction: 'top', offset: [0, -20] });
 }
 
 // === Route Mode Switch ===
