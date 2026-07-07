@@ -5,7 +5,7 @@ let manualPoints = [];
 let manualMarkers = [];
 let manualPolyline = null;
 let routeSeed = 0;
-let selectedLapDist = 400; // 200, 400, 800
+let selectedLapDist = 100; // 100, 200, 400
 
 // init moved to bottom of file
 
