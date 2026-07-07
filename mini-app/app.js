@@ -521,8 +521,9 @@ async function tryBuildTrip(lat, lng, radiusKm) {
     const rLat = radiusKm * latDegPerKm;
     const rLng = radiusKm * lngDegPerKm;
 
-    const angleOffset = (routeSeed * 0.7) % (2 * Math.PI);
-    const numPts = 8;
+    const angleOffset = (routeSeed * 0.5) % (2 * Math.PI);
+    // Используем 6 точек для простого маршрута
+    const numPts = 6;
     const waypoints = [{ lat, lon: lng }];
     for (let i = 0; i < numPts; i++) {
         const angle = angleOffset + (2 * Math.PI * i) / numPts;
@@ -553,15 +554,18 @@ async function valhallaRoute(waypoints) {
         costing_options: {
             pedestrian: {
                 walking_speed: 5.0,
-                use_roads: 0.0,
+                use_roads: 0.1,
                 use_tracks: 0.0,
-                use_living_roads: 0.2,
+                use_living_roads: 0.5,
                 use_highways: 0.0,
-                use_hills: 0.5,
-                use_hills_mountain: 0.5
+                use_hills: 0.3,
+                use_hills_mountain: 0.3,
+                service_factor: 1.0,
+                alley_factor: 0.5,
+                driveway_factor: 0.0,
+                parking_lot_factor: 0.0
             }
-        },
-        avoid_polygons: null
+        }
     };
 
     try {
