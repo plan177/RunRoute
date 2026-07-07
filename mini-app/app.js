@@ -907,7 +907,7 @@ async function shareRoute() {
             await navigator.share({
                 files: [file],
                 title: 'Маршрут ' + dist + ' км',
-                text: '🏃 Маршрут ' + dist + ' км — RunRouteBot'
+                text: '🏃 Маршрут ' + dist + ' км построен в @run_route_bot'
             });
             showToast('Маршрут отправлен');
         } catch (e) {
