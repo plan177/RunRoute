@@ -26,7 +26,7 @@ function initMap() {
         bounceAtZoomLimits: false
     }).setView([55.7558, 37.6173], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap'
+        attribution: false
     }).addTo(map);
     setTimeout(() => map.invalidateSize(), 200);
     map.on('click', onMapClick);
