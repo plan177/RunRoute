@@ -521,33 +521,102 @@ async function tryBuildTrip(lat, lng, radiusKm) {
     const rLat = radiusKm * latDegPerKm;
     const rLng = radiusKm * lngDegPerKm;
 
-    const angleOffset = (routeSeed * 0.7) % (2 * Math.PI);
-    const numPts = 8;
-    const waypoints = [[lng, lat]];
+    const angleOffset = (routeSeed * 0.5) % (2 * Math.PI);
+    // Используем 6 точек для простого маршрута
+    const numPts = 6;
+    const waypoints = [{ lat, lon: lng }];
     for (let i = 0; i < numPts; i++) {
         const angle = angleOffset + (2 * Math.PI * i) / numPts;
-        waypoints.push([
-            lng + rLng * Math.cos(angle),
-            lat + rLat * Math.sin(angle)
-        ]);
+        waypoints.push({
+            lat: lat + rLat * Math.sin(angle),
+            lon: lng + rLng * Math.cos(angle)
+        });
     }
-    waypoints.push([lng, lat]);
+    waypoints.push({ lat, lon: lng });
 
-    const coords = waypoints.map(p => p[0].toFixed(6) + ',' + p[1].toFixed(6)).join(';');
-    const url = 'https://router.project-osrm.org/route/v1/foot/' + coords +
-        '?overview=full&geometries=geojson&steps=false';
+    return await valhallaRoute(waypoints);
+}
+
+async function valhallaRoute(waypoints) {
+    const locations = waypoints.map((p, i) => ({
+        lat: p.lat,
+        lon: p.lon,
+        type: (i === 0 || i === waypoints.length - 1) ? 'break' : 'through'
+    }));
+
+    const body = {
+        locations: locations,
+        costing: 'pedestrian',
+        directions_options: {
+            units: 'kilometers',
+            language: 'ru-RU'
+        },
+        costing_options: {
+            pedestrian: {
+                walking_speed: 5.0,
+                use_roads: 0.1,
+                use_tracks: 0.0,
+                use_living_roads: 0.5,
+                use_highways: 0.0,
+                use_hills: 0.3,
+                use_hills_mountain: 0.3,
+                service_factor: 1.0,
+                alley_factor: 0.5,
+                driveway_factor: 0.0,
+                parking_lot_factor: 0.0
+            }
+        }
+    };
 
     try {
-        const resp = await fetch(url);
+        const resp = await fetch('https://valhalla1.openstreetmap.de/route', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
         const data = await resp.json();
-        if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) return null;
-        const route = data.routes[0];
-        const points = route.geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
-        const distance_km = haversineArr(points);
-        return { points, distance_km };
+
+        if (!data.trip || !data.trip.legs || data.trip.legs.length === 0) return null;
+
+        const leg = data.trip.legs[0];
+        const shape = decodePolyline(leg.shape);
+
+        // Считаем расстояние по точкам для точности
+        const distance_km = haversineArr(shape);
+
+        return { points: shape, distance_km };
     } catch {
         return null;
     }
+}
+
+function decodePolyline(encoded) {
+    const points = [];
+    let index = 0;
+    let lat = 0;
+    let lng = 0;
+
+    while (index < encoded.length) {
+        let b, shift = 0, result = 0;
+        do {
+            b = encoded.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        lat += ((result & 1) ? ~(result >> 1) : (result >> 1));
+
+        shift = 0;
+        result = 0;
+        do {
+            b = encoded.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        lng += ((result & 1) ? ~(result >> 1) : (result >> 1));
+
+        points.push({ lat: lat / 1e6, lng: lng / 1e6 });
+    }
+    return points;
 }
 
 function buildPerfectCircle(lat, lng, targetKm) {
@@ -582,29 +651,21 @@ async function generateManualRoute() {
     btn.innerHTML = '<span class="loading"></span> Построение...';
 
     try {
-        const coords = manualPoints.map(p => p.lng.toFixed(6) + ',' + p.lat.toFixed(6)).join(';');
-        const url = 'https://router.project-osrm.org/route/v1/foot/' + coords +
-            '?overview=full&geometries=geojson&steps=false';
+        const waypoints = manualPoints.map(p => ({ lat: p.lat, lon: p.lng }));
+        const result = await valhallaRoute(waypoints);
 
-        const resp = await fetch(url);
-        const data = await resp.json();
-
-        if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
+        if (!result) {
             alert('Маршрут не найден. Попробуйте другие точки.');
             return;
         }
 
-        const route = data.routes[0];
-        const points = route.geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
-        const distance_km = haversineArr(points);
-
         if (manualPolyline) { map.removeLayer(manualPolyline); manualPolyline = null; }
 
         currentRoute = {
-            points,
-            distance_km,
+            points: result.points,
+            distance_km: result.distance_km,
             accuracy: 0,
-            gpx: makeGPX(points, 'Manual Route')
+            gpx: makeGPX(result.points, 'Manual Route')
         };
 
         displayRoute(currentRoute);
