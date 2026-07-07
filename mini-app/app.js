@@ -541,7 +541,7 @@ async function valhallaRoute(waypoints) {
     const locations = waypoints.map((p, i) => ({
         lat: p.lat,
         lon: p.lon,
-        type: i === 0 ? 'break' : (i === waypoints.length - 1 ? 'break' : 'through')
+        type: (i === 0 || i === waypoints.length - 1) ? 'break' : 'through'
     }));
 
     const body = {
@@ -580,7 +580,9 @@ async function valhallaRoute(waypoints) {
 
         const leg = data.trip.legs[0];
         const shape = decodePolyline(leg.shape);
-        const distance_km = leg.summary.length / 1000;
+
+        // Считаем расстояние по точкам для точности
+        const distance_km = haversineArr(shape);
 
         return { points: shape, distance_km };
     } catch {
