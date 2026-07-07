@@ -869,6 +869,10 @@ body {
     border-color: var(--glass-border) !important;
 }
 
+.leaflet-control-attribution {
+    display: none !important;
+}
+
 .waypoint-marker { background: none !important; border: none !important; }
 
 .start-finish-marker {
