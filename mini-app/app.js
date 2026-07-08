@@ -106,9 +106,13 @@ function initRouteMode() {
         const prevMode = routeMode;
         routeMode = newMode;
 
+        if (tracking && newMode !== 'track') {
+            stopTracking();
+        }
+
         if (newMode === 'manual' && prevMode === 'auto' && userLocation && !manualPoints.length) {
             useStartForManual();
-        } else {
+        } else if (newMode !== 'manual') {
             clearManualMode();
         }
         updateUIForMode();
@@ -170,10 +174,16 @@ function showConfirmModal(text) {
 
 function updateUIForMode() {
     const isAuto = routeMode === 'auto';
+    const isManual = routeMode === 'manual';
+    const isTrack = routeMode === 'track';
     document.getElementById('auto-controls').classList.toggle('hidden', !isAuto);
-    document.getElementById('manual-controls').classList.toggle('hidden', isAuto);
+    document.getElementById('manual-controls').classList.toggle('hidden', !isManual);
+    document.getElementById('track-controls').classList.toggle('hidden', !isTrack);
     document.getElementById('hint-auto').classList.toggle('hidden', !isAuto);
     document.getElementById('hint-manual').classList.add('hidden');
+    document.getElementById('generate-btn').classList.toggle('hidden', isTrack);
+    document.getElementById('regenerate-btn').classList.add('hidden');
+    document.getElementById('share-btn').classList.add('hidden');
 }
 
 function clearManualMode() {

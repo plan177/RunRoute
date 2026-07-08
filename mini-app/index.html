@@ -91,6 +91,13 @@
                     </svg>
                     Вручную
                 </button>
+                <button class="mode-btn" data-mode="track">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                    </svg>
+                    Следование
+                </button>
             </div>
 
             <div id="auto-controls" class="controls-panel">
@@ -156,12 +163,18 @@
                 </div>
             </div>
 
-            <div class="action-buttons">
+            <div id="track-controls" class="controls-panel hidden">
+                <div id="track-status" class="track-status">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                    </svg>
+                    <span>GPS-трекинг маршрута в реальном времени</span>
+                </div>
                 <div class="btn-row">
                     <button id="track-start-btn" class="btn-track-start">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="3"/>
-                            <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                            <polygon points="5 3 19 12 5 21 5 3"/>
                         </svg>
                         Старт
                     </button>
@@ -172,6 +185,16 @@
                         Стоп
                     </button>
                 </div>
+                <div id="track-hint" class="hint">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                        <circle cx="12" cy="10" r="3"/>
+                    </svg>
+                    Нажмите "Старт" и бегите — маршрут запишется автоматически
+                </div>
+            </div>
+
+            <div class="action-buttons">
                 <button id="generate-btn" class="btn-primary" disabled>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="10"/>
