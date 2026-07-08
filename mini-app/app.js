@@ -797,11 +797,25 @@ function showRouteButtons() {
 
 function displayRoute(route) {
     if (routeLayer) map.removeLayer(routeLayer);
-    routeLayer = L.polyline(
-        route.points.map(p => [p.lat, p.lng]),
-        { color: '#39FF14', weight: 4, opacity: 0.9 }
-    ).addTo(map);
-    map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
+    const pts = route.points.map(p => [p.lat, p.lng]);
+    const segments = [];
+    const segSize = Math.max(1, Math.floor(pts.length / 20));
+    for (let i = 0; i < pts.length - 1; i += segSize) {
+        const chunk = pts.slice(i, i + segSize + 1);
+        if (chunk.length < 2) continue;
+        const t = i / (pts.length - 1);
+        const r = Math.round(57 + t * (0 - 57));
+        const g = Math.round(255 + t * (212 - 255));
+        const b = Math.round(20 + t * (255 - 20));
+        segments.push(L.polyline(chunk, {
+            color: `rgb(${r},${g},${b})`,
+            weight: 4,
+            opacity: 0.9
+        }));
+    }
+    routeLayer = L.layerGroup(segments).addTo(map);
+    const bounds = L.latLngBounds(pts);
+    map.fitBounds(bounds, { padding: [40, 40] });
 
     document.getElementById('route-distance').textContent = route.distance_km.toFixed(2) + ' км';
     const accEl = document.getElementById('route-accuracy');
