@@ -91,6 +91,13 @@
                     </svg>
                     Вручную
                 </button>
+                <button class="mode-btn" data-mode="track">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                    </svg>
+                    Следование
+                </button>
             </div>
 
             <div id="auto-controls" class="controls-panel">
@@ -153,6 +160,30 @@
                         <path d="M12 8h.01"/>
                     </svg>
                     Добавляйте точки на карту
+                </div>
+            </div>
+
+            <div id="track-controls" class="controls-panel hidden">
+                <div id="track-status" class="track-status">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                    </svg>
+                    <span>GPS-трекинг маршрута в реальном времени</span>
+                </div>
+                <div class="btn-row">
+                    <button id="track-start-btn" class="btn-track-start">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        Старт
+                    </button>
+                    <button id="track-stop-btn" class="btn-track-stop hidden">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="6" y="6" width="12" height="12" rx="2"/>
+                        </svg>
+                        Стоп
+                    </button>
                 </div>
             </div>
 

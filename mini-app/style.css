@@ -558,6 +558,67 @@ body {
     animation: fadeInUp 0.5s ease 0.5s both;
 }
 
+.btn-track-start, .btn-track-stop {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    touch-action: manipulation;
+}
+
+.btn-track-start {
+    background: linear-gradient(135deg, #00C853, #00E676);
+    color: #000;
+}
+
+.btn-track-start:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0, 200, 83, 0.4);
+}
+
+.btn-track-stop {
+    background: linear-gradient(135deg, #FF3B5C, #FF6B81);
+    color: #fff;
+}
+
+.btn-track-stop:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(255, 59, 92, 0.4);
+}
+
+.btn-track-start svg, .btn-track-stop svg {
+    width: 20px;
+    height: 20px;
+}
+
+.track-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px;
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 12px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.track-status svg {
+    width: 20px;
+    height: 20px;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
 .btn-primary {
     width: 100%;
     display: flex;
