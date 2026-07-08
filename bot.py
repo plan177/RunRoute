@@ -9,7 +9,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
+BOT_TOKEN = os.getenv('BOT_TOKEN')
 WEB_APP_URL = os.getenv('WEB_APP_URL', 'https://run-route-ten.vercel.app')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,9 +56,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Exception while handling an update: {context.error}")
 
 def main():
-    if BOT_TOKEN == 'YOUR_BOT_TOKEN_HERE':
-        logger.warning("BOT_TOKEN not set! Bot will not start.")
-        logger.info("Set BOT_TOKEN in .env file or environment variable")
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN not set! Bot will not start.")
         return
     
     app = ApplicationBuilder().token(BOT_TOKEN).build()
