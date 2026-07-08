@@ -358,6 +358,69 @@ function closeManualRoute() {
     redrawManualPolyline();
 }
 
+// === GPS Location ===
+
+function detectLocation() {
+    const btn = document.getElementById('gps-btn');
+    const status = document.getElementById('location-status');
+    btn.classList.add('loading');
+    status.textContent = 'Определение местоположения...';
+    status.className = 'status';
+
+    if (window.Telegram?.WebApp?.LocationManager) {
+        Telegram.WebApp.LocationManager.getLocation()
+            .then(loc => {
+                if (loc && loc.latitude) {
+                    applyLocation(loc.latitude, loc.longitude);
+                } else {
+                    fallbackBrowserGeo();
+                }
+            })
+            .catch(() => fallbackBrowserGeo())
+            .finally(() => btn.classList.remove('loading'));
+    } else {
+        fallbackBrowserGeo(btn);
+    }
+}
+
+function fallbackBrowserGeo(btn) {
+    if (!navigator.geolocation) {
+        const status = document.getElementById('location-status');
+        status.textContent = 'Геолокация не поддерживается';
+        status.className = 'status error';
+        if (btn) btn.classList.remove('loading');
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        pos => {
+            applyLocation(pos.coords.latitude, pos.coords.longitude);
+            document.getElementById('gps-btn').classList.remove('loading');
+        },
+        err => {
+            const status = document.getElementById('location-status');
+            status.textContent = 'Не удалось определить местоположение';
+            status.className = 'status error';
+            document.getElementById('gps-btn').classList.remove('loading');
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+    );
+}
+
+function applyLocation(lat, lng) {
+    userLocation = { lat, lng };
+    if (routeMode === 'manual') {
+        addManualPoint(lat, lng);
+    } else {
+        setStartMarker(lat, lng);
+    }
+    map.setView([lat, lng], 15);
+    const status = document.getElementById('location-status');
+    status.textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
+    status.className = 'status success';
+    document.getElementById('generate-btn').disabled = false;
+}
+
 // === Search ===
 
 let searchDebounce = null;
@@ -375,6 +438,7 @@ function initSearch() {
     });
 
     document.getElementById('search-btn').addEventListener('click', searchAddress);
+    document.getElementById('gps-btn').addEventListener('click', detectLocation);
     input.addEventListener('keypress', e => {
         if (e.key === 'Enter') {
             hideSuggestions();
