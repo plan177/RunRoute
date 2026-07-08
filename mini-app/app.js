@@ -593,7 +593,7 @@ async function buildPreciseRoute(lat, lng, targetKm) {
     const TOLERANCE_KM = 0.1;
     let bestRoute = null;
     let bestDiff = Infinity;
-    let radiusKm = targetKm / (2 * Math.PI);
+    let radiusKm = targetKm / (2 * Math.PI) * 1.2;
 
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
         const route = await tryBuildTrip(lat, lng, radiusKm);
@@ -633,7 +633,7 @@ async function tryBuildTrip(lat, lng, radiusKm) {
     const waypoints = [{ lat, lon: lng }];
     for (let i = 0; i < numPts; i++) {
         const angle = angleOffset + (2 * Math.PI * i) / numPts;
-        const spiralFactor = 0.7 + 0.3 * (i / numPts);
+        const spiralFactor = 0.6 + 0.4 * Math.pow(i / numPts, 0.7);
         waypoints.push({
             lat: lat + rLat * spiralFactor * Math.sin(angle),
             lon: lng + rLng * spiralFactor * Math.cos(angle)
@@ -661,14 +661,14 @@ async function valhallaRoute(waypoints) {
         costing_options: {
             pedestrian: {
                 walking_speed: 5.0,
-                use_roads: 0.5,
+                use_roads: 0.6,
                 use_tracks: 0.0,
-                use_living_roads: 0.2,
+                use_living_roads: 0.1,
                 use_highways: 0.0,
                 use_hills: 0.3,
                 use_hills_mountain: 0.3,
-                service_factor: 1.0,
-                alley_factor: 2.0,
+                service_factor: 0.5,
+                alley_factor: 5.0,
                 driveway_factor: 0.0,
                 parking_lot_factor: 0.0
             }
