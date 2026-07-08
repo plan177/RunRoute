@@ -208,10 +208,44 @@ function addManualPoint(lat, lng) {
         removeManualPoint(idx);
     });
 
+    marker.on('drag', function() {
+        if (manualRouteClosed) return;
+        const isLast = idx === manualPoints.length - 1 && idx > 0;
+        if (!isLast) return;
+
+        const draggedPos = marker.getLatLng();
+        const firstPos = manualMarkers[0].getLatLng();
+        const dist = map.latLngToContainerPoint(draggedPos)
+            .distanceTo(map.latLngToContainerPoint(firstPos));
+
+        const firstEl = manualMarkers[0].getElement();
+        if (firstEl) {
+            firstEl.querySelector('.manual-marker').classList.toggle('snap-highlight', dist < 40);
+        }
+    });
+
     marker.on('dragend', function() {
         marker._justDragged = true;
         const pos = marker.getLatLng();
         manualPoints[idx] = { lat: pos.lat, lng: pos.lng };
+
+        const isLast = idx === manualPoints.length - 1 && idx > 0;
+        if (isLast && !manualRouteClosed) {
+            const firstPos = manualMarkers[0].getLatLng();
+            const dist = map.latLngToContainerPoint(pos)
+                .distanceTo(map.latLngToContainerPoint(firstPos));
+
+            const firstEl = manualMarkers[0].getElement();
+            if (firstEl) {
+                firstEl.querySelector('.manual-marker').classList.remove('snap-highlight');
+            }
+
+            if (dist < 40) {
+                closeManualRoute();
+                return;
+            }
+        }
+
         redrawManualPolyline();
         if (currentRoute && manualPoints.length >= 2) {
             generateManualRoute();
