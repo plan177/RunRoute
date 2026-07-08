@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import httpx
 from route_generator import RouteGenerator
-from models import RouteRequest, RouteResponse
+from models import RouteRequest, RouteResponse, FeedbackRequest
 import uvicorn
 
 logging.basicConfig(level=logging.INFO)
@@ -146,6 +146,57 @@ async def generate_route(request: RouteRequest, http_request: Request):
     except Exception as e:
         logger.error(f"Route generation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate route")
+
+@app.post("/api/feedback")
+async def send_feedback(request: FeedbackRequest):
+    bot_token = os.getenv("BOT_TOKEN")
+    feedback_chat_id = os.getenv("FEEDBACK_CHAT_ID")
+
+    if not bot_token or bot_token == "YOUR_BOT_TOKEN_HERE":
+        raise HTTPException(status_code=500, detail="Bot token not configured")
+    if not feedback_chat_id:
+        raise HTTPException(status_code=500, detail="Feedback chat ID not configured")
+
+    try:
+        user_info = "Аноним"
+        if request.username:
+            user_info = f"@{request.username}"
+        elif request.user_id:
+            user_info = f"ID: {request.user_id}"
+
+        text = (
+            f"\ud83d\udcac <b>Новая обратная связь</b>\n\n"
+            f"<b>От:</b> {user_info}\n"
+            f"<b>Сообщение:</b>\n{request.message}"
+        )
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={
+                    "chat_id": feedback_chat_id,
+                    "text": text,
+                    "parse_mode": "HTML"
+                },
+                timeout=10.0
+            )
+
+        if response.status_code != 200:
+            logger.error(f"Telegram API error: {response.text}")
+            raise HTTPException(status_code=502, detail="Failed to send feedback to Telegram")
+
+        result = response.json()
+        if not result.get("ok"):
+            logger.error(f"Telegram API returned error: {result}")
+            raise HTTPException(status_code=502, detail="Telegram API error")
+
+        return {"success": True, "message": "Feedback sent"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to send feedback: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send feedback")
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
