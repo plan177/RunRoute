@@ -70,8 +70,17 @@ function setStartMarker(lat, lng) {
                   '<div class="map-pin-inner"></div>' +
                   '</div>',
             iconSize: [32, 42], iconAnchor: [16, 42]
-        })
+        }),
+        draggable: true
     }).addTo(map);
+
+    startMarker.on('dragend', function() {
+        const pos = startMarker.getLatLng();
+        userLocation = { lat: pos.lat, lng: pos.lng };
+        document.getElementById('location-status').textContent =
+            pos.lat.toFixed(5) + ', ' + pos.lng.toFixed(5);
+        if (currentRoute) generateAutoRoute();
+    });
 }
 
 // === Route Mode Switch ===
@@ -187,12 +196,24 @@ function addManualPoint(lat, lng) {
                   '<span class="manual-marker-del" data-idx="' + idx + '">&times;</span>' +
                   '</div>',
             iconSize: [30, 30], iconAnchor: [15, 15]
-        })
+        }),
+        draggable: true
     }).addTo(map);
 
     marker.on('click', function(e) {
+        if (marker._justDragged) { marker._justDragged = false; return; }
         L.DomEvent.stop(e);
         removeManualPoint(idx);
+    });
+
+    marker.on('dragend', function() {
+        marker._justDragged = true;
+        const pos = marker.getLatLng();
+        manualPoints[idx] = { lat: pos.lat, lng: pos.lng };
+        redrawManualPolyline();
+        if (currentRoute && manualPoints.length >= 2) {
+            generateManualRoute();
+        }
     });
 
     manualMarkers.push(marker);
@@ -238,8 +259,19 @@ function renumberMarkers() {
         }));
         m.off('click');
         m.on('click', function(e) {
+            if (m._justDragged) { m._justDragged = false; return; }
             L.DomEvent.stop(e);
             removeManualPoint(i);
+        });
+        m.off('dragend');
+        m.on('dragend', function() {
+            m._justDragged = true;
+            const pos = m.getLatLng();
+            manualPoints[i] = { lat: pos.lat, lng: pos.lng };
+            redrawManualPolyline();
+            if (currentRoute && manualPoints.length >= 2) {
+                generateManualRoute();
+            }
         });
     });
 }
