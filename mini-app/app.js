@@ -628,15 +628,14 @@ async function tryBuildTrip(lat, lng, radiusKm) {
     const rLat = radiusKm * latDegPerKm;
     const rLng = radiusKm * lngDegPerKm;
 
-    const angleOffset = (routeSeed * 0.7) % (2 * Math.PI);
-    const numPts = 8;
+    const angleOffset = (routeSeed * 0.8) % (2 * Math.PI);
+    const numPts = 5;
     const waypoints = [{ lat, lon: lng }];
     for (let i = 0; i < numPts; i++) {
         const angle = angleOffset + (2 * Math.PI * i) / numPts;
-        const spiralFactor = 0.6 + 0.4 * Math.pow(i / numPts, 0.7);
         waypoints.push({
-            lat: lat + rLat * spiralFactor * Math.sin(angle),
-            lon: lng + rLng * spiralFactor * Math.cos(angle)
+            lat: lat + rLat * Math.sin(angle),
+            lon: lng + rLng * Math.cos(angle)
         });
     }
     waypoints.push({ lat, lon: lng });
@@ -648,7 +647,7 @@ async function valhallaRoute(waypoints) {
     const locations = waypoints.map((p, i) => ({
         lat: p.lat,
         lon: p.lon,
-        type: (i === 0 || i === waypoints.length - 1) ? 'break' : 'through'
+        type: i === 0 || i === waypoints.length - 1 ? 'break' : 'through'
     }));
 
     const body = {
@@ -661,14 +660,14 @@ async function valhallaRoute(waypoints) {
         costing_options: {
             pedestrian: {
                 walking_speed: 5.0,
-                use_roads: 0.6,
+                use_roads: 0.8,
                 use_tracks: 0.0,
-                use_living_roads: 0.1,
+                use_living_roads: 0.05,
                 use_highways: 0.0,
                 use_hills: 0.3,
                 use_hills_mountain: 0.3,
-                service_factor: 0.5,
-                alley_factor: 5.0,
+                service_factor: 0.2,
+                alley_factor: 15.0,
                 driveway_factor: 0.0,
                 parking_lot_factor: 0.0
             }
