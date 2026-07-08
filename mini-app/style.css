@@ -337,6 +337,41 @@ body {
     transform: scale(0.95);
 }
 
+.btn-gps {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    touch-action: manipulation;
+    flex-shrink: 0;
+}
+
+.btn-gps svg {
+    width: 20px;
+    height: 20px;
+}
+
+.btn-gps:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn-gps:active {
+    transform: scale(0.95);
+}
+
+.btn-gps.loading {
+    animation: pulse 1s ease infinite;
+    color: var(--primary);
+}
+
 .status {
     font-size: 12px;
     color: var(--text-secondary);
