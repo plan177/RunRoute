@@ -631,8 +631,8 @@ body {
     padding: 12px;
     border: none;
     border-radius: var(--radius-sm);
-    background: linear-gradient(135deg, #2AABEE, #229ED9);
-    color: #fff;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    color: #000;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
@@ -647,7 +647,7 @@ body {
 
 .btn-share:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(42, 171, 238, 0.4);
+    box-shadow: 0 4px 20px rgba(57, 255, 20, 0.4);
 }
 
 /* Map */
