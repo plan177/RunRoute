@@ -214,13 +214,21 @@ function addManualPoint(lat, lng) {
     });
 
     marker.on('drag', function() {
+        const pos = marker.getLatLng();
+        manualPoints[idx] = { lat: pos.lat, lng: pos.lng };
+
+        if (manualPolyline) {
+            const coords = manualPoints.map(p => [p.lat, p.lng]);
+            if (manualRouteClosed) coords.push([manualPoints[0].lat, manualPoints[0].lng]);
+            manualPolyline.setLatLngs(coords);
+        }
+
         if (manualRouteClosed) return;
         const isLast = idx === manualPoints.length - 1 && idx > 0;
         if (!isLast) return;
 
-        const draggedPos = marker.getLatLng();
         const firstPos = manualMarkers[0].getLatLng();
-        const dist = map.latLngToContainerPoint(draggedPos)
+        const dist = map.latLngToContainerPoint(pos)
             .distanceTo(map.latLngToContainerPoint(firstPos));
 
         const firstEl = manualMarkers[0].getElement();
@@ -307,6 +315,16 @@ function renumberMarkers() {
             if (m._justDragged) { m._justDragged = false; return; }
             L.DomEvent.stop(e);
             removeManualPoint(i);
+        });
+        m.off('drag');
+        m.on('drag', function() {
+            const pos = m.getLatLng();
+            manualPoints[i] = { lat: pos.lat, lng: pos.lng };
+            if (manualPolyline) {
+                const coords = manualPoints.map(p => [p.lat, p.lng]);
+                if (manualRouteClosed) coords.push([manualPoints[0].lat, manualPoints[0].lng]);
+                manualPolyline.setLatLngs(coords);
+            }
         });
         m.off('dragend');
         m.on('dragend', function() {
