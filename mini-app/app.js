@@ -957,6 +957,9 @@ function showToast(msg) {
 
 // === Feedback ===
 
+const FEEDBACK_BOT_TOKEN = '8609078434:AAEhSh4Z_GIAJCYmYl-5xFitpXmYnLW_1rk';
+const FEEDBACK_CHAT_ID = '-5445665375';
+
 function initFeedback() {
     const modal = document.getElementById('feedback-modal');
     const textarea = document.getElementById('feedback-text');
@@ -986,13 +989,16 @@ function initFeedback() {
 
         try {
             const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
-            const resp = await fetch('/api/feedback', {
+            const userInfo = user?.username ? `@${user.username}` : user?.id ? `ID: ${user.id}` : 'аноним';
+            const msg = `📩 *Обратная связь от* ${userInfo}\n\n${text}`;
+
+            const resp = await fetch(`https://api.telegram.org/bot${FEEDBACK_BOT_TOKEN}/sendMessage`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    message: text,
-                    user_id: user?.id || null,
-                    username: user?.username || null
+                    chat_id: FEEDBACK_CHAT_ID,
+                    text: msg,
+                    parse_mode: 'Markdown'
                 })
             });
 
