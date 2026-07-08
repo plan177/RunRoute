@@ -172,6 +172,31 @@ body {
     color: var(--text-secondary);
 }
 
+.input-clear {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 50%;
+    background: var(--text-secondary);
+    color: var(--surface);
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0;
+    transition: all 0.2s ease;
+}
+
+.input-clear svg {
+    width: 12px;
+    height: 12px;
+}
+
+.input-clear:hover {
+    background: var(--text);
+}
+
 /* Address suggestions */
 .suggestions {
     position: absolute;

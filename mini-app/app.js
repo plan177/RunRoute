@@ -266,6 +266,14 @@ let searchDebounce = null;
 function initSearch() {
     const input = document.getElementById('address-input');
     const suggestions = document.getElementById('address-suggestions');
+    const clearBtn = document.getElementById('clear-input-btn');
+
+    clearBtn.addEventListener('click', () => {
+        input.value = '';
+        clearBtn.classList.add('hidden');
+        hideSuggestions();
+        input.focus();
+    });
 
     document.getElementById('search-btn').addEventListener('click', searchAddress);
     input.addEventListener('keypress', e => {
@@ -277,6 +285,7 @@ function initSearch() {
 
     // Autocomplete
     input.addEventListener('input', () => {
+        clearBtn.classList.toggle('hidden', input.value.length === 0);
         clearTimeout(searchDebounce);
         const query = input.value.trim();
         if (query.length < 3) {
