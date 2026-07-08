@@ -1,11 +1,2 @@
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
 python-telegram-bot==20.7
-httpx==0.25.2
-osmnx==1.7.1
-networkx==3.2.1
-geopy==2.4.1
-pydantic==2.5.3
 python-dotenv==1.0.0
-slowapi==0.1.9
-python-multipart==0.0.6
