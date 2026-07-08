@@ -403,7 +403,7 @@ body {
 }
 
 .chip {
-    padding: 8px 14px;
+    padding: 8px 12px;
     border: 1px solid var(--glass-border);
     border-radius: 20px;
     background: var(--surface);
@@ -413,6 +413,7 @@ body {
     cursor: pointer;
     transition: all 0.3s ease;
     touch-action: manipulation;
+    white-space: nowrap;
 }
 
 .chip.active {
