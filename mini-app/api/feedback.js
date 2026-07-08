@@ -25,13 +25,13 @@ export default async function handler(req, res) {
     }
 
     const userInfo = username ? `@${username}` : user_id ? `ID: ${user_id}` : 'аноним';
-    const text = `📩 *Обратная связь от* ${userInfo}\n\n${message.trim()}`;
+    const text = `📩 Обратная связь от ${userInfo}\n\n${message.trim()}`;
 
     try {
         const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: parseInt(chatId), text, parse_mode: 'Markdown' })
+            body: JSON.stringify({ chat_id: parseInt(chatId), text })
         });
 
         const data = await resp.json();
