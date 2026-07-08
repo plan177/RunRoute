@@ -547,7 +547,7 @@ body {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 14px;
+    padding: 12px;
     border: none;
     border-radius: var(--radius-sm);
     background: linear-gradient(135deg, #2AABEE, #229ED9);

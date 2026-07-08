@@ -107,8 +107,7 @@ function useStartForManual() {
             currentRoute = null;
             document.getElementById('route-info').classList.add('hidden');
             document.getElementById('regenerate-btn').classList.add('hidden');
-            document.getElementById('download-btn').classList.add('hidden');
-            document.getElementById('share-row').classList.add('hidden');
+            document.getElementById('share-btn').classList.add('hidden');
 
             addManualPoint(userLocation.lat, userLocation.lng);
             const hint = document.getElementById('hint-manual');
@@ -165,8 +164,7 @@ function clearManualMode() {
     currentRoute = null;
     document.getElementById('generate-btn').disabled = true;
     document.getElementById('regenerate-btn').classList.add('hidden');
-    document.getElementById('download-btn').classList.add('hidden');
-    document.getElementById('share-row').classList.add('hidden');
+    document.getElementById('share-btn').classList.add('hidden');
     document.getElementById('route-info').classList.add('hidden');
     updateManualCount();
 }
@@ -439,7 +437,6 @@ function parseCoord(s) {
 function initRouteControls() {
     document.getElementById('generate-btn').addEventListener('click', generateRoute);
     document.getElementById('regenerate-btn').addEventListener('click', regenerateRoute);
-    document.getElementById('download-btn').addEventListener('click', downloadGPX);
     document.querySelectorAll('.distance-chips .chip[data-distance]').forEach(b => b.addEventListener('click', e => {
         const chip = e.target.closest('.chip');
         document.querySelectorAll('.distance-chips .chip[data-distance]').forEach(x => x.classList.remove('active'));
@@ -683,8 +680,7 @@ async function generateManualRoute() {
 
 function showRouteButtons() {
     document.getElementById('regenerate-btn').classList.remove('hidden');
-    document.getElementById('download-btn').classList.remove('hidden');
-    document.getElementById('share-row').classList.remove('hidden');
+    document.getElementById('share-btn').classList.remove('hidden');
     document.getElementById('route-info').classList.remove('hidden');
 }
 
