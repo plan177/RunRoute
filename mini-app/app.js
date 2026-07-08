@@ -957,9 +957,6 @@ function showToast(msg) {
 
 // === Feedback ===
 
-const FEEDBACK_BOT_TOKEN = '8609078434:AAEhSh4Z_GIAJCYmYl-5xFitpXmYnLW_1rk';
-const FEEDBACK_CHAT_ID = '-5445665375';
-
 function initFeedback() {
     const modal = document.getElementById('feedback-modal');
     const textarea = document.getElementById('feedback-text');
@@ -989,27 +986,26 @@ function initFeedback() {
 
         try {
             const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
-            const userInfo = user?.username ? `@${user.username}` : user?.id ? `ID: ${user.id}` : 'аноним';
-            const msg = `📩 *Обратная связь от* ${userInfo}\n\n${text}`;
-
-            const resp = await fetch(`https://api.telegram.org/bot${FEEDBACK_BOT_TOKEN}/sendMessage`, {
+            const resp = await fetch('/api/feedback', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    chat_id: FEEDBACK_CHAT_ID,
-                    text: msg,
-                    parse_mode: 'Markdown'
+                    message: text,
+                    user_id: user?.id || null,
+                    username: user?.username || null
                 })
             });
+
+            const data = await resp.json();
 
             if (resp.ok) {
                 modal.classList.add('hidden');
                 showToast('Отправлено');
             } else {
-                alert('Не удалось отправить. Попробуйте позже.');
+                alert('Ошибка: ' + (data.error || 'Не удалось отправить'));
             }
-        } catch {
-            alert('Ошибка сети. Попробуйте позже.');
+        } catch (e) {
+            alert('Ошибка сети: ' + e.message);
         } finally {
             sendBtn.disabled = false;
             sendBtn.textContent = 'Отправить';
