@@ -25,8 +25,10 @@ function initMap() {
         tapTimeout: 300,
         bounceAtZoomLimits: false
     }).setView([55.7558, 37.6173], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: false
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: false,
+        subdomains: 'abcd',
+        maxZoom: 19
     }).addTo(map);
     setTimeout(() => map.invalidateSize(), 200);
     map.on('click', onMapClick);
