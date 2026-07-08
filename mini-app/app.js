@@ -208,6 +208,11 @@ function addManualPoint(lat, lng) {
         removeManualPoint(idx);
     });
 
+    marker.on('dragstart', function() {
+        const pos = marker.getLatLng();
+        marker._dragStartPos = { lat: pos.lat, lng: pos.lng };
+    });
+
     marker.on('drag', function() {
         if (manualRouteClosed) return;
         const isLast = idx === manualPoints.length - 1 && idx > 0;
@@ -227,7 +232,6 @@ function addManualPoint(lat, lng) {
     marker.on('dragend', function() {
         marker._justDragged = true;
         const pos = marker.getLatLng();
-        manualPoints[idx] = { lat: pos.lat, lng: pos.lng };
 
         const isLast = idx === manualPoints.length - 1 && idx > 0;
         if (isLast && !manualRouteClosed) {
@@ -241,11 +245,16 @@ function addManualPoint(lat, lng) {
             }
 
             if (dist < 40) {
+                if (marker._dragStartPos) {
+                    marker.setLatLng([marker._dragStartPos.lat, marker._dragStartPos.lng]);
+                    manualPoints[idx] = { lat: marker._dragStartPos.lat, lng: marker._dragStartPos.lng };
+                }
                 closeManualRoute();
                 return;
             }
         }
 
+        manualPoints[idx] = { lat: pos.lat, lng: pos.lng };
         redrawManualPolyline();
         if (currentRoute && manualPoints.length >= 2) {
             generateManualRoute();
