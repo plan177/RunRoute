@@ -39,9 +39,64 @@ body {
 
 /* Header */
 .header {
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 12px 0 16px;
     animation: fadeInDown 0.5s ease;
+    position: relative;
+}
+
+.feedback-btn {
+    position: absolute;
+    right: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xs);
+    background: var(--glass);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    touch-action: manipulation;
+}
+
+.feedback-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.feedback-btn:hover {
+    background: var(--primary);
+    color: #000;
+    border-color: var(--primary);
+}
+
+.feedback-textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xs);
+    background: var(--elevated);
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 80px;
+    margin-bottom: 16px;
+    outline: none;
+    transition: border-color 0.3s ease;
+}
+
+.feedback-textarea:focus {
+    border-color: var(--primary);
+}
+
+.feedback-textarea::placeholder {
+    color: var(--text-secondary);
 }
 
 .logo {
