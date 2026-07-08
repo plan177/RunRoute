@@ -8,6 +8,17 @@ let manualRouteClosed = false;
 let routeSeed = 0;
 let selectedLapDist = 100; // 100, 200, 400
 
+// === Live Tracking ===
+let tracking = false;
+let trackingWatchId = null;
+let trackingPoints = [];
+let trackingPolyline = null;
+let trackingMarker = null;
+let trackingLastValid = null;
+const TRACK_MIN_DIST_M = 5;
+const TRACK_MAX_SPEED_KMH = 20;
+const TRACK_SMOOTH_N = 3;
+
 // init moved to bottom of file
 
 function initTelegram() {
@@ -1134,6 +1145,105 @@ function showToast(msg) {
     setTimeout(() => el.classList.add('hidden'), 2500);
 }
 
+// === Live Tracking ===
+
+function startTracking() {
+    if (!navigator.geolocation) {
+        alert('Геолокация не поддерживается');
+        return;
+    }
+
+    tracking = true;
+    trackingPoints = [];
+    trackingLastValid = null;
+
+    if (trackingPolyline) { map.removeLayer(trackingPolyline); trackingPolyline = null; }
+
+    document.getElementById('track-start-btn').classList.add('hidden');
+    document.getElementById('track-stop-btn').classList.remove('hidden');
+
+    trackingWatchId = navigator.geolocation.watchPosition(
+        pos => onTrackingPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 1000 }
+    );
+}
+
+function stopTracking() {
+    tracking = false;
+    if (trackingWatchId !== null) {
+        navigator.geolocation.clearWatch(trackingWatchId);
+        trackingWatchId = null;
+    }
+
+    document.getElementById('track-start-btn').classList.remove('hidden');
+    document.getElementById('track-stop-btn').classList.add('hidden');
+
+    if (trackingPoints.length < 2) {
+        alert('Недостаточно точек для маршрута');
+        return;
+    }
+
+    const totalDist = haversineArr(trackingPoints);
+    currentRoute = {
+        points: trackingPoints,
+        distance_km: totalDist,
+        accuracy: 0,
+        gpx: makeGPX(trackingPoints, 'Live Track ' + totalDist.toFixed(1) + 'km')
+    };
+    displayRoute(currentRoute);
+    showRouteButtons();
+}
+
+function onTrackingPosition(lat, lng, accuracy) {
+    if (!tracking) return;
+
+    const point = { lat, lng };
+
+    if (trackingLastValid) {
+        const dist = haversine(trackingLastValid.lat, trackingLastValid.lng, lat, lng);
+        const timeSec = (Date.now() - trackingLastValid.time) / 1000;
+        if (timeSec > 0) {
+            const speedKmh = (dist / timeSec) * 3600;
+            if (speedKmh > TRACK_MAX_SPEED_KMH) return;
+        }
+        if (dist * 1000 < TRACK_MIN_DIST_M) return;
+    }
+
+    const smoothed = smoothPoint(point);
+    trackingLastValid = { lat: smoothed.lat, lng: smoothed.lng, time: Date.now() };
+    trackingPoints.push(smoothed);
+
+    if (trackingPolyline) map.removeLayer(trackingPolyline);
+    trackingPolyline = L.polyline(
+        trackingPoints.map(p => [p.lat, p.lng]),
+        { color: '#39FF14', weight: 4, opacity: 0.9 }
+    ).addTo(map);
+
+    if (!trackingMarker) {
+        trackingMarker = L.circleMarker([smoothed.lat, smoothed.lng], {
+            radius: 8,
+            color: '#39FF14',
+            fillColor: '#39FF14',
+            fillOpacity: 0.5,
+            weight: 2
+        }).addTo(map);
+    } else {
+        trackingMarker.setLatLng([smoothed.lat, smoothed.lng]);
+    }
+
+    map.setView([smoothed.lat, smoothed.lng], map.getZoom());
+}
+
+function smoothPoint(point) {
+    if (trackingPoints.length < TRACK_SMOOTH_N) return point;
+    const recent = trackingPoints.slice(-TRACK_SMOOTH_N);
+    recent.push(point);
+    const avgLat = recent.reduce((s, p) => s + p.lat, 0) / recent.length;
+    const avgLng = recent.reduce((s, p) => s + p.lng, 0) / recent.length;
+    return { lat: avgLat, lng: avgLng };
+}
+
 // === Feedback ===
 
 function initFeedback() {
@@ -1204,5 +1314,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTelegram();
     initShare();
     initFeedback();
+    document.getElementById('track-start-btn').addEventListener('click', startTracking);
+    document.getElementById('track-stop-btn').addEventListener('click', stopTracking);
     updateUIForMode();
 });
