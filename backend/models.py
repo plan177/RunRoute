@@ -16,3 +16,8 @@ class RouteResponse(BaseModel):
     distance_km: float
     duration_min: float
     gpx: str
+
+class FeedbackRequest(BaseModel):
+    message: str
+    user_id: Optional[int] = None
+    username: Optional[str] = None
