@@ -6,6 +6,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import httpx
 from route_generator import RouteGenerator
 from models import RouteRequest, RouteResponse
@@ -33,6 +34,11 @@ app.add_middleware(
 generator = RouteGenerator()
 
 rate_limit_store = {}
+
+class FeedbackRequest(BaseModel):
+    message: str
+    user_id: int | None = None
+    username: str | None = None
 
 def check_rate_limit(ip: str, max_requests: int = 10, window_seconds: int = 60) -> bool:
     now = datetime.now().timestamp()
@@ -146,6 +152,44 @@ async def generate_route(request: RouteRequest, http_request: Request):
     except Exception as e:
         logger.error(f"Route generation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate route")
+
+@app.post("/api/feedback")
+async def send_feedback(request: FeedbackRequest):
+    bot_token = os.getenv("BOT_TOKEN")
+    chat_id = os.getenv("FEEDBACK_CHAT_ID")
+
+    if not bot_token or not chat_id:
+        raise HTTPException(status_code=500, detail="Feedback not configured")
+
+    user_info = ""
+    if request.username:
+        user_info = f"@{request.username}"
+    elif request.user_id:
+        user_info = f"ID: {request.user_id}"
+    else:
+        user_info = "аноним"
+
+    text = (
+        f"📩 *Обратная связь от* {user_info}\n\n"
+        f"{request.message}"
+    )
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={"chat_id": int(chat_id), "text": text, "parse_mode": "Markdown"},
+                timeout=10
+            )
+            if resp.status_code != 200:
+                logger.error(f"Telegram send failed: {resp.text}")
+                raise HTTPException(status_code=500, detail="Failed to send feedback")
+        return {"status": "ok"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Feedback error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send feedback")
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

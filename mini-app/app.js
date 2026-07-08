@@ -955,6 +955,62 @@ function showToast(msg) {
     setTimeout(() => el.classList.add('hidden'), 2500);
 }
 
+// === Feedback ===
+
+function initFeedback() {
+    const modal = document.getElementById('feedback-modal');
+    const textarea = document.getElementById('feedback-text');
+    const sendBtn = document.getElementById('feedback-send');
+    const cancelBtn = document.getElementById('feedback-cancel');
+
+    document.getElementById('feedback-btn').addEventListener('click', () => {
+        textarea.value = '';
+        modal.classList.remove('hidden');
+        textarea.focus();
+    });
+
+    cancelBtn.addEventListener('click', () => {
+        modal.classList.add('hidden');
+    });
+
+    modal.addEventListener('click', e => {
+        if (e.target === modal) modal.classList.add('hidden');
+    });
+
+    sendBtn.addEventListener('click', async () => {
+        const text = textarea.value.trim();
+        if (!text) return;
+
+        sendBtn.disabled = true;
+        sendBtn.textContent = 'Отправка...';
+
+        try {
+            const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
+            const resp = await fetch('/api/feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: text,
+                    user_id: user?.id || null,
+                    username: user?.username || null
+                })
+            });
+
+            if (resp.ok) {
+                modal.classList.add('hidden');
+                showToast('Отправлено');
+            } else {
+                alert('Не удалось отправить. Попробуйте позже.');
+            }
+        } catch {
+            alert('Ошибка сети. Попробуйте позже.');
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Отправить';
+        }
+    });
+}
+
 // === Init all ===
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -966,5 +1022,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initPace();
     initTelegram();
     initShare();
+    initFeedback();
     updateUIForMode();
 });

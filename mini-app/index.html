@@ -21,6 +21,11 @@
                 </svg>
                 <h1>RunRoute</h1>
             </div>
+            <button id="feedback-btn" class="feedback-btn" title="Обратная связь">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+            </button>
         </header>
 
         <div class="tabs">
@@ -257,6 +262,17 @@
                     <span id="route-accuracy" class="stat-value">--</span>
                     <span class="stat-label">Точность</span>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="feedback-modal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <p class="modal-text">Напишите ваш отзыв или предложение</p>
+            <textarea id="feedback-text" class="feedback-textarea" placeholder="Ваше сообщение..." rows="4"></textarea>
+            <div class="modal-actions">
+                <button id="feedback-send" class="modal-btn primary">Отправить</button>
+                <button id="feedback-cancel" class="modal-btn secondary">Отмена</button>
             </div>
         </div>
     </div>
