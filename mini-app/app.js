@@ -4,6 +4,7 @@ let routeMode = 'auto'; // 'auto' | 'manual'
 let manualPoints = [];
 let manualMarkers = [];
 let manualPolyline = null;
+let manualRouteClosed = false;
 let routeSeed = 0;
 let selectedLapDist = 100; // 100, 200, 400
 
@@ -168,6 +169,7 @@ function clearManualMode() {
     manualPoints = [];
     manualMarkers.forEach(m => map.removeLayer(m));
     manualMarkers = [];
+    manualRouteClosed = false;
     if (manualPolyline) { map.removeLayer(manualPolyline); manualPolyline = null; }
     if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
     currentRoute = null;
@@ -279,16 +281,20 @@ function renumberMarkers() {
 function redrawManualPolyline() {
     if (manualPolyline) map.removeLayer(manualPolyline);
     if (manualPoints.length < 2) { manualPolyline = null; return; }
+    const coords = manualPoints.map(p => [p.lat, p.lng]);
+    if (manualRouteClosed) {
+        coords.push([manualPoints[0].lat, manualPoints[0].lng]);
+    }
     manualPolyline = L.polyline(
-        manualPoints.map(p => [p.lat, p.lng]),
+        coords,
         { color: '#39FF14', weight: 3, dashArray: '8,6', opacity: 0.8 }
     ).addTo(map);
 }
 
 function closeManualRoute() {
     if (manualPoints.length < 2) return;
-    const first = manualPoints[0];
-    addManualPoint(first.lat, first.lng);
+    manualRouteClosed = true;
+    redrawManualPolyline();
 }
 
 // === Search ===
@@ -692,6 +698,9 @@ async function generateManualRoute() {
 
     try {
         const waypoints = manualPoints.map(p => ({ lat: p.lat, lon: p.lng }));
+        if (manualRouteClosed && waypoints.length > 1) {
+            waypoints.push({ lat: waypoints[0].lat, lon: waypoints[0].lon });
+        }
         const result = await valhallaRoute(waypoints);
 
         if (!result) {
