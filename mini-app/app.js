@@ -113,13 +113,15 @@ function initRouteMode() {
         const prevMode = routeMode;
         routeMode = newMode;
 
-        if (tracking && newMode !== 'track') {
-            stopTracking();
-        }
-
-        if (newMode === 'manual' && prevMode === 'auto' && userLocation && !manualPoints.length) {
-            useStartForManual();
-        } else if (newMode !== 'manual') {
+        if (newMode === 'manual') {
+            if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+            if (prevMode === 'auto' && userLocation && !manualPoints.length) {
+                addManualPoint(userLocation.lat, userLocation.lng);
+                const hint = document.getElementById('hint-manual');
+                hint.textContent = 'Точка старта добавлена. Нажмите чтобы поставить вторую';
+                hint.classList.remove('hidden');
+            }
+        } else {
             clearManualMode();
         }
         updateUIForMode();
@@ -181,16 +183,10 @@ function showConfirmModal(text) {
 
 function updateUIForMode() {
     const isAuto = routeMode === 'auto';
-    const isManual = routeMode === 'manual';
-    const isTrack = routeMode === 'track';
     document.getElementById('auto-controls').classList.toggle('hidden', !isAuto);
-    document.getElementById('manual-controls').classList.toggle('hidden', !isManual);
-    document.getElementById('track-controls').classList.toggle('hidden', !isTrack);
+    document.getElementById('manual-controls').classList.toggle('hidden', isAuto);
     document.getElementById('hint-auto').classList.toggle('hidden', !isAuto);
     document.getElementById('hint-manual').classList.add('hidden');
-    document.getElementById('generate-btn').classList.toggle('hidden', isTrack);
-    document.getElementById('regenerate-btn').classList.add('hidden');
-    document.getElementById('share-btn').classList.add('hidden');
 }
 
 function clearManualMode() {
@@ -198,9 +194,6 @@ function clearManualMode() {
     manualMarkers.forEach(m => map.removeLayer(m));
     manualMarkers = [];
     manualRouteClosed = false;
-    insertMode = false;
-    document.getElementById('insert-mode-btn').classList.remove('active');
-    document.body.classList.remove('insert-mode');
     if (manualPolyline) { map.removeLayer(manualPolyline); manualPolyline = null; }
     if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
     currentRoute = null;
@@ -534,145 +527,58 @@ function rebuildManualMarkers() {
 
 // === GPS Location ===
 
-let locationManagerInited = false;
-let lastKnownLocation = null;
-
-function initGPS() {
-    document.getElementById('gps-btn').addEventListener('click', onGPSClick);
-    initLocationManager();
-}
-
-function initLocationManager() {
-    if (!window.Telegram?.WebApp?.LocationManager) {
-        requestBrowserGPS();
-        return;
-    }
-
-    const lm = Telegram.WebApp.LocationManager;
-    if (lm.isInited) {
-        locationManagerInited = true;
-        tryAutoRequestGPS();
-        return;
-    }
-
-    lm.init(() => {
-        locationManagerInited = true;
-        tryAutoRequestGPS();
-    });
-}
-
-function tryAutoRequestGPS() {
-    const lm = Telegram.WebApp.LocationManager;
-    if (!lm || !locationManagerInited) return;
-
-    // Use cached location immediately if fresh (< 5 min)
-    if (lastKnownLocation && (Date.now() - lastKnownLocation.timestamp < 300000)) {
-        applyGPSLocation(lastKnownLocation.lat, lastKnownLocation.lng);
-        return;
-    }
-
-    if (!lm.isLocationAvailable) {
-        requestBrowserGPS();
-        return;
-    }
-
-    if (lm.isAccessGranted) {
-        requestTelegramLocation();
-    } else if (!lm.isAccessRequested) {
-        requestTelegramLocation();
-    }
-}
-
-function requestTelegramLocation() {
-    const lm = Telegram.WebApp.LocationManager;
-    if (!lm || !locationManagerInited) {
-        requestBrowserGPS();
-        return;
-    }
-
+function detectLocation() {
+    const btn = document.getElementById('gps-btn');
     const status = document.getElementById('location-status');
+    btn.classList.add('loading');
     status.textContent = 'Определение местоположения...';
-    status.className = 'status loading';
+    status.className = 'status';
 
-    lm.getLocation((loc) => {
-        if (loc && loc.latitude) {
-            applyGPSLocation(loc.latitude, loc.longitude);
-        } else if (!lm.isAccessGranted) {
-            status.textContent = 'Геолокация недоступна. Нажмите для настроек';
-            status.className = 'status error';
-            status.onclick = () => {
-                lm.openSettings();
-                status.onclick = null;
-            };
-        } else {
-            requestBrowserGPS();
-        }
-    });
-}
-
-function onGPSClick() {
-    if (window.Telegram?.WebApp?.LocationManager && locationManagerInited) {
-        requestTelegramLocation();
+    if (window.Telegram?.WebApp?.LocationManager) {
+        Telegram.WebApp.LocationManager.getLocation()
+            .then(loc => {
+                if (loc && loc.latitude) {
+                    applyLocation(loc.latitude, loc.longitude);
+                } else {
+                    fallbackBrowserGeo();
+                }
+            })
+            .catch(() => fallbackBrowserGeo())
+            .finally(() => btn.classList.remove('loading'));
     } else {
-        requestBrowserGPS();
+        fallbackBrowserGeo(btn);
     }
 }
 
-function requestBrowserGPS() {
-    if (!navigator.geolocation) return;
+function fallbackBrowserGeo(btn) {
+    if (!navigator.geolocation) {
+        const status = document.getElementById('location-status');
+        status.textContent = 'Геолокация не поддерживается';
+        status.className = 'status error';
+        if (btn) btn.classList.remove('loading');
+        return;
+    }
 
-    const status = document.getElementById('location-status');
-    status.textContent = 'Определение местоположения...';
-    status.className = 'status loading';
-
-    // Stage 1: Fast location (WiFi/cell towers, ~1-2 sec)
     navigator.geolocation.getCurrentPosition(
         pos => {
-            applyGPSLocation(pos.coords.latitude, pos.coords.longitude);
-            // Stage 2: Upgrade to high accuracy in background
-            navigator.geolocation.getCurrentPosition(
-                pos2 => applyGPSLocation(pos2.coords.latitude, pos2.coords.longitude),
-                () => {},
-                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-            );
+            applyLocation(pos.coords.latitude, pos.coords.longitude);
+            document.getElementById('gps-btn').classList.remove('loading');
         },
-        () => {
-            // Fallback: try high accuracy directly
-            navigator.geolocation.getCurrentPosition(
-                pos => applyGPSLocation(pos.coords.latitude, pos.coords.longitude),
-                err => {
-                    status.textContent = 'Не удалось определить местоположение';
-                    status.className = 'status error';
-                },
-                { enableHighAccuracy: true, timeout: 10000 }
-            );
+        err => {
+            const status = document.getElementById('location-status');
+            status.textContent = 'Не удалось определить местоположение';
+            status.className = 'status error';
+            document.getElementById('gps-btn').classList.remove('loading');
         },
-        { enableHighAccuracy: false, timeout: 3000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 10000 }
     );
-}
-
-function applyGPSLocation(lat, lng) {
-    if (routeMode === 'manual' && manualPoints.length > 0) return;
-
-    lastKnownLocation = { lat, lng, timestamp: Date.now() };
-    userLocation = { lat, lng };
-    if (routeMode === 'manual') {
-        addManualPoint(lat, lng);
-    } else {
-        setStartMarker(lat, lng);
-    }
-    map.setView([lat, lng], 15);
-    const status = document.getElementById('location-status');
-    status.textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
-    status.className = 'status success';
-    document.getElementById('generate-btn').disabled = false;
 }
 
 function applyLocation(lat, lng) {
     userLocation = { lat, lng };
     if (routeMode === 'manual') {
         addManualPoint(lat, lng);
-    } else if (routeMode === 'auto') {
+    } else {
         setStartMarker(lat, lng);
     }
     map.setView([lat, lng], 15);
@@ -699,6 +605,7 @@ function initSearch() {
     });
 
     document.getElementById('search-btn').addEventListener('click', searchAddress);
+    document.getElementById('gps-btn').addEventListener('click', detectLocation);
     input.addEventListener('keypress', e => {
         if (e.key === 'Enter') {
             hideSuggestions();
@@ -971,7 +878,7 @@ async function valhallaRoute(waypoints) {
     const locations = waypoints.map((p, i) => ({
         lat: p.lat,
         lon: p.lon,
-        type: 'break'
+        type: i === 0 || i === waypoints.length - 1 ? 'break' : 'through'
     }));
 
     const body = {
@@ -1567,5 +1474,4 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);
     updateUIForMode();
-    initGPS();
 });
