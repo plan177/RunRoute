@@ -60,6 +60,16 @@ function initTabs() {
 }
 
 function onMapClick(e) {
+    if (!locationRequested) {
+        locationRequested = true;
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                pos => applyLocation(pos.coords.latitude, pos.coords.longitude),
+                () => {},
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        }
+    }
     if (routeMode === 'manual') {
         addManualPoint(e.latlng.lat, e.latlng.lng);
         return;
@@ -1304,6 +1314,4 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);
     updateUIForMode();
-    document.addEventListener('click', requestLocationOnInteraction);
-    document.addEventListener('touchstart', requestLocationOnInteraction);
 });
