@@ -381,13 +381,18 @@ function closeManualRoute() {
 
 // === GPS Location ===
 
-function autoDetectLocation() {
+let locationRequested = false;
+
+function requestLocationOnInteraction() {
+    if (locationRequested) return;
+    locationRequested = true;
+    document.removeEventListener('click', requestLocationOnInteraction);
+    document.removeEventListener('touchstart', requestLocationOnInteraction);
+
     if (window.Telegram?.WebApp?.LocationManager) {
         Telegram.WebApp.LocationManager.getLocation()
             .then(loc => {
-                if (loc && loc.latitude) {
-                    applyLocation(loc.latitude, loc.longitude);
-                }
+                if (loc && loc.latitude) applyLocation(loc.latitude, loc.longitude);
             })
             .catch(() => {});
     }
@@ -1299,5 +1304,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);
     updateUIForMode();
-    autoDetectLocation();
+    document.addEventListener('click', requestLocationOnInteraction);
+    document.addEventListener('touchstart', requestLocationOnInteraction);
 });
