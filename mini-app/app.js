@@ -60,16 +60,6 @@ function initTabs() {
 }
 
 function onMapClick(e) {
-    if (!locationRequested) {
-        locationRequested = true;
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-                pos => applyLocation(pos.coords.latitude, pos.coords.longitude),
-                () => {},
-                { enableHighAccuracy: true, timeout: 10000 }
-            );
-        }
-    }
     if (routeMode === 'manual') {
         addManualPoint(e.latlng.lat, e.latlng.lng);
         return;
@@ -391,29 +381,45 @@ function closeManualRoute() {
 
 // === GPS Location ===
 
-let locationRequested = false;
+function initGPS() {
+    document.getElementById('gps-btn').addEventListener('click', onGPSClick);
+}
 
-function requestLocationOnInteraction() {
-    if (locationRequested) return;
-    locationRequested = true;
-    document.removeEventListener('click', requestLocationOnInteraction);
-    document.removeEventListener('touchstart', requestLocationOnInteraction);
-
+function onGPSClick() {
     if (window.Telegram?.WebApp?.LocationManager) {
         Telegram.WebApp.LocationManager.getLocation()
             .then(loc => {
-                if (loc && loc.latitude) applyLocation(loc.latitude, loc.longitude);
+                if (loc && loc.latitude) applyGPSLocation(loc.latitude, loc.longitude);
             })
-            .catch(() => {});
+            .catch(() => requestBrowserGPS());
+    } else {
+        requestBrowserGPS();
     }
+}
 
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-            pos => applyLocation(pos.coords.latitude, pos.coords.longitude),
-            () => {},
-            { enableHighAccuracy: true, timeout: 10000 }
-        );
+function requestBrowserGPS() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+        pos => applyGPSLocation(pos.coords.latitude, pos.coords.longitude),
+        () => {},
+        { enableHighAccuracy: true, timeout: 10000 }
+    );
+}
+
+function applyGPSLocation(lat, lng) {
+    if (routeMode === 'manual' && manualPoints.length > 0) return;
+
+    userLocation = { lat, lng };
+    if (routeMode === 'manual') {
+        addManualPoint(lat, lng);
+    } else {
+        setStartMarker(lat, lng);
     }
+    map.setView([lat, lng], 15);
+    const status = document.getElementById('location-status');
+    status.textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
+    status.className = 'status success';
+    document.getElementById('generate-btn').disabled = false;
 }
 
 function applyLocation(lat, lng) {
@@ -1314,4 +1320,5 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);
     updateUIForMode();
+    initGPS();
 });
