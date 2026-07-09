@@ -382,6 +382,7 @@ function closeManualRoute() {
 // === GPS Location ===
 
 let locationManagerInited = false;
+let lastKnownLocation = null;
 
 function initGPS() {
     document.getElementById('gps-btn').addEventListener('click', onGPSClick);
@@ -410,6 +411,12 @@ function initLocationManager() {
 function tryAutoRequestGPS() {
     const lm = Telegram.WebApp.LocationManager;
     if (!lm || !locationManagerInited) return;
+
+    // Use cached location immediately if fresh (< 5 min)
+    if (lastKnownLocation && (Date.now() - lastKnownLocation.timestamp < 300000)) {
+        applyGPSLocation(lastKnownLocation.lat, lastKnownLocation.lng);
+        return;
+    }
 
     if (!lm.isLocationAvailable) {
         requestBrowserGPS();
@@ -465,19 +472,36 @@ function requestBrowserGPS() {
     status.textContent = 'Определение местоположения...';
     status.className = 'status loading';
 
+    // Stage 1: Fast location (WiFi/cell towers, ~1-2 sec)
     navigator.geolocation.getCurrentPosition(
-        pos => applyGPSLocation(pos.coords.latitude, pos.coords.longitude),
-        err => {
-            status.textContent = 'Не удалось определить местоположение';
-            status.className = 'status error';
+        pos => {
+            applyGPSLocation(pos.coords.latitude, pos.coords.longitude);
+            // Stage 2: Upgrade to high accuracy in background
+            navigator.geolocation.getCurrentPosition(
+                pos2 => applyGPSLocation(pos2.coords.latitude, pos2.coords.longitude),
+                () => {},
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+            );
         },
-        { enableHighAccuracy: true, timeout: 10000 }
+        () => {
+            // Fallback: try high accuracy directly
+            navigator.geolocation.getCurrentPosition(
+                pos => applyGPSLocation(pos.coords.latitude, pos.coords.longitude),
+                err => {
+                    status.textContent = 'Не удалось определить местоположение';
+                    status.className = 'status error';
+                },
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        },
+        { enableHighAccuracy: false, timeout: 3000, maximumAge: 0 }
     );
 }
 
 function applyGPSLocation(lat, lng) {
     if (routeMode === 'manual' && manualPoints.length > 0) return;
 
+    lastKnownLocation = { lat, lng, timestamp: Date.now() };
     userLocation = { lat, lng };
     if (routeMode === 'manual') {
         addManualPoint(lat, lng);

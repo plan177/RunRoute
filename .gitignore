@@ -4,11 +4,14 @@
 # Claude Code
 .claude/
 
+# RuFlo
+.claude-flow/
+.mcp.json
+.swarm/
+CLAUDE.md
+
 # Logs
 bot.log
-
-# Graphify output
-graphify-out/
 
 # Documentation
 README.md
