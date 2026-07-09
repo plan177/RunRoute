@@ -381,58 +381,121 @@ function closeManualRoute() {
 
 // === GPS Location ===
 
-function detectLocation() {
-    const btn = document.getElementById('gps-btn');
-    const status = document.getElementById('location-status');
-    btn.classList.add('loading');
-    status.textContent = 'Определение местоположения...';
-    status.className = 'status';
+let locationManagerInited = false;
 
-    if (window.Telegram?.WebApp?.LocationManager) {
-        Telegram.WebApp.LocationManager.getLocation()
-            .then(loc => {
-                if (loc && loc.latitude) {
-                    applyLocation(loc.latitude, loc.longitude);
-                } else {
-                    fallbackBrowserGeo();
-                }
-            })
-            .catch(() => fallbackBrowserGeo())
-            .finally(() => btn.classList.remove('loading'));
-    } else {
-        fallbackBrowserGeo(btn);
-    }
+function initGPS() {
+    document.getElementById('gps-btn').addEventListener('click', onGPSClick);
+    initLocationManager();
 }
 
-function fallbackBrowserGeo(btn) {
-    if (!navigator.geolocation) {
-        const status = document.getElementById('location-status');
-        status.textContent = 'Геолокация не поддерживается';
-        status.className = 'status error';
-        if (btn) btn.classList.remove('loading');
+function initLocationManager() {
+    if (!window.Telegram?.WebApp?.LocationManager) {
+        requestBrowserGPS();
         return;
     }
 
+    const lm = Telegram.WebApp.LocationManager;
+    if (lm.isInited) {
+        locationManagerInited = true;
+        tryAutoRequestGPS();
+        return;
+    }
+
+    lm.init(() => {
+        locationManagerInited = true;
+        tryAutoRequestGPS();
+    });
+}
+
+function tryAutoRequestGPS() {
+    const lm = Telegram.WebApp.LocationManager;
+    if (!lm || !locationManagerInited) return;
+
+    if (!lm.isLocationAvailable) {
+        requestBrowserGPS();
+        return;
+    }
+
+    if (lm.isAccessGranted) {
+        requestTelegramLocation();
+    } else if (!lm.isAccessRequested) {
+        requestTelegramLocation();
+    }
+}
+
+function requestTelegramLocation() {
+    const lm = Telegram.WebApp.LocationManager;
+    if (!lm || !locationManagerInited) {
+        requestBrowserGPS();
+        return;
+    }
+
+    const status = document.getElementById('location-status');
+    status.textContent = 'Определение местоположения...';
+    status.className = 'status loading';
+
+    lm.getLocation((loc) => {
+        if (loc && loc.latitude) {
+            applyGPSLocation(loc.latitude, loc.longitude);
+        } else if (!lm.isAccessGranted) {
+            status.textContent = 'Геолокация недоступна. Нажмите для настроек';
+            status.className = 'status error';
+            status.onclick = () => {
+                lm.openSettings();
+                status.onclick = null;
+            };
+        } else {
+            requestBrowserGPS();
+        }
+    });
+}
+
+function onGPSClick() {
+    if (window.Telegram?.WebApp?.LocationManager && locationManagerInited) {
+        requestTelegramLocation();
+    } else {
+        requestBrowserGPS();
+    }
+}
+
+function requestBrowserGPS() {
+    if (!navigator.geolocation) return;
+
+    const status = document.getElementById('location-status');
+    status.textContent = 'Определение местоположения...';
+    status.className = 'status loading';
+
     navigator.geolocation.getCurrentPosition(
-        pos => {
-            applyLocation(pos.coords.latitude, pos.coords.longitude);
-            document.getElementById('gps-btn').classList.remove('loading');
-        },
+        pos => applyGPSLocation(pos.coords.latitude, pos.coords.longitude),
         err => {
-            const status = document.getElementById('location-status');
             status.textContent = 'Не удалось определить местоположение';
             status.className = 'status error';
-            document.getElementById('gps-btn').classList.remove('loading');
         },
         { enableHighAccuracy: true, timeout: 10000 }
     );
+}
+
+function applyGPSLocation(lat, lng) {
+    if (routeMode === 'manual' && manualPoints.length > 0) return;
+
+    userLocation = { lat, lng };
+    if (routeMode === 'manual') {
+        addManualPoint(lat, lng);
+    } else {
+        setStartMarker(lat, lng);
+    }
+    map.setView([lat, lng], 15);
+    const status = document.getElementById('location-status');
+    status.textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
+    status.className = 'status success';
+    document.getElementById('generate-btn').disabled = false;
 }
 
 function applyLocation(lat, lng) {
     userLocation = { lat, lng };
     if (routeMode === 'manual') {
         addManualPoint(lat, lng);
-    } else {
+    } else if (routeMode === 'auto') {
         setStartMarker(lat, lng);
     }
     map.setView([lat, lng], 15);
@@ -459,7 +522,6 @@ function initSearch() {
     });
 
     document.getElementById('search-btn').addEventListener('click', searchAddress);
-    document.getElementById('gps-btn').addEventListener('click', detectLocation);
     input.addEventListener('keypress', e => {
         if (e.key === 'Enter') {
             hideSuggestions();
@@ -1327,4 +1389,5 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);
     updateUIForMode();
+    initGPS();
 });
