@@ -61,13 +61,6 @@ function initTabs() {
 
 function onMapClick(e) {
     if (routeMode === 'manual') {
-        if (insertMode && manualPoints.length >= 2) {
-            const insertIdx = findNearestSegmentIdx(e.latlng.lat, e.latlng.lng);
-            if (insertIdx >= 0) {
-                insertManualPointBetween(insertIdx, e.latlng.lat, e.latlng.lng);
-                return;
-            }
-        }
         addManualPoint(e.latlng.lat, e.latlng.lng);
         return;
     }
@@ -113,13 +106,9 @@ function initRouteMode() {
         const prevMode = routeMode;
         routeMode = newMode;
 
-        if (tracking && newMode !== 'track') {
-            stopTracking();
-        }
-
         if (newMode === 'manual' && prevMode === 'auto' && userLocation && !manualPoints.length) {
             useStartForManual();
-        } else if (newMode !== 'manual') {
+        } else {
             clearManualMode();
         }
         updateUIForMode();
@@ -181,16 +170,10 @@ function showConfirmModal(text) {
 
 function updateUIForMode() {
     const isAuto = routeMode === 'auto';
-    const isManual = routeMode === 'manual';
-    const isTrack = routeMode === 'track';
     document.getElementById('auto-controls').classList.toggle('hidden', !isAuto);
-    document.getElementById('manual-controls').classList.toggle('hidden', !isManual);
-    document.getElementById('track-controls').classList.toggle('hidden', !isTrack);
+    document.getElementById('manual-controls').classList.toggle('hidden', isAuto);
     document.getElementById('hint-auto').classList.toggle('hidden', !isAuto);
     document.getElementById('hint-manual').classList.add('hidden');
-    document.getElementById('generate-btn').classList.toggle('hidden', isTrack);
-    document.getElementById('regenerate-btn').classList.add('hidden');
-    document.getElementById('share-btn').classList.add('hidden');
 }
 
 function clearManualMode() {
@@ -198,9 +181,6 @@ function clearManualMode() {
     manualMarkers.forEach(m => map.removeLayer(m));
     manualMarkers = [];
     manualRouteClosed = false;
-    insertMode = false;
-    document.getElementById('insert-mode-btn').classList.remove('active');
-    document.body.classList.remove('insert-mode');
     if (manualPolyline) { map.removeLayer(manualPolyline); manualPolyline = null; }
     if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
     currentRoute = null;
@@ -389,290 +369,60 @@ function closeManualRoute() {
     redrawManualPolyline();
 }
 
-// === Insert point between existing ===
-
-let insertMode = false;
-
-function initInsertMode() {
-    document.getElementById('insert-mode-btn').addEventListener('click', toggleInsertMode);
-}
-
-function toggleInsertMode() {
-    insertMode = !insertMode;
-    document.getElementById('insert-mode-btn').classList.toggle('active', insertMode);
-    document.body.classList.toggle('insert-mode', insertMode);
-}
-
-function findNearestSegmentIdx(lat, lng) {
-    if (manualPoints.length < 2) return -1;
-
-    let minDist = Infinity;
-    let insertIdx = -1;
-
-    for (let i = 0; i < manualPoints.length - 1; i++) {
-        const p1 = manualPoints[i];
-        const p2 = manualPoints[i + 1];
-        const dist = distToSegment(lat, lng, p1.lat, p1.lng, p2.lat, p2.lng);
-        if (dist < minDist) {
-            minDist = dist;
-            insertIdx = i + 1;
-        }
-    }
-
-    if (manualRouteClosed && manualPoints.length > 2) {
-        const p1 = manualPoints[manualPoints.length - 1];
-        const p2 = manualPoints[0];
-        const dist = distToSegment(lat, lng, p1.lat, p1.lng, p2.lat, p2.lng);
-        if (dist < minDist) {
-            minDist = dist;
-            insertIdx = manualPoints.length;
-        }
-    }
-
-    return minDist < 0.0003 ? insertIdx : -1;
-}
-
-function distToSegment(px, py, x1, y1, x2, y2) {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
-    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
-    t = Math.max(0, Math.min(1, t));
-    const projX = x1 + t * dx;
-    const projY = y1 + t * dy;
-    return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
-}
-
-function insertManualPointBetween(idx, lat, lng) {
-    manualPoints.splice(idx, 0, { lat, lng });
-    rebuildManualMarkers();
-    redrawManualPolyline();
-    updateManualCount();
-    document.getElementById('generate-btn').disabled = manualPoints.length < 2;
-}
-
-function rebuildManualMarkers() {
-    manualMarkers.forEach(m => map.removeLayer(m));
-    manualMarkers = [];
-
-    manualPoints.forEach((p, i) => {
-        const marker = L.marker([p.lat, p.lng], {
-            icon: L.divIcon({
-                className: 'waypoint-marker',
-                html: '<div class="manual-marker" data-idx="' + i + '">' +
-                      '<span class="manual-marker-num">' + (i + 1) + '</span>' +
-                      '<span class="manual-marker-del" data-idx="' + i + '">&times;</span>' +
-                      '</div>',
-                iconSize: [30, 30], iconAnchor: [15, 15]
-            }),
-            draggable: true
-        }).addTo(map);
-
-        marker.on('click', function(e) {
-            if (marker._justDragged) { marker._justDragged = false; return; }
-            L.DomEvent.stop(e);
-            removeManualPoint(i);
-        });
-
-        marker.on('dragstart', function() {
-            const pos = marker.getLatLng();
-            marker._dragStartPos = { lat: pos.lat, lng: pos.lng };
-        });
-
-        marker.on('drag', function() {
-            const pos = marker.getLatLng();
-            manualPoints[i] = { lat: pos.lat, lng: pos.lng };
-            if (manualPolyline) {
-                const coords = manualPoints.map(p => [p.lat, p.lng]);
-                if (manualRouteClosed) coords.push([manualPoints[0].lat, manualPoints[0].lng]);
-                manualPolyline.setLatLngs(coords);
-            }
-            if (manualRouteClosed) return;
-            const isLast = i === manualPoints.length - 1 && i > 0;
-            if (!isLast) return;
-            const firstPos = manualMarkers[0].getLatLng();
-            const dist = map.latLngToContainerPoint(pos)
-                .distanceTo(map.latLngToContainerPoint(firstPos));
-            const firstEl = manualMarkers[0].getElement();
-            if (firstEl) {
-                firstEl.querySelector('.manual-marker').classList.toggle('snap-highlight', dist < 40);
-            }
-        });
-
-        marker.on('dragend', function() {
-            marker._justDragged = true;
-            const pos = marker.getLatLng();
-            const isLast = i === manualPoints.length - 1 && i > 0;
-            if (isLast && !manualRouteClosed) {
-                const firstPos = manualMarkers[0].getLatLng();
-                const dist = map.latLngToContainerPoint(pos)
-                    .distanceTo(map.latLngToContainerPoint(firstPos));
-                const firstEl = manualMarkers[0].getElement();
-                if (firstEl) {
-                    firstEl.querySelector('.manual-marker').classList.remove('snap-highlight');
-                }
-                if (dist < 40) {
-                    if (marker._dragStartPos) {
-                        marker.setLatLng([marker._dragStartPos.lat, marker._dragStartPos.lng]);
-                        manualPoints[i] = { lat: marker._dragStartPos.lat, lng: marker._dragStartPos.lng };
-                    }
-                    closeManualRoute();
-                    return;
-                }
-            }
-            manualPoints[i] = { lat: pos.lat, lng: pos.lng };
-            redrawManualPolyline();
-            if (currentRoute && manualPoints.length >= 2) {
-                generateManualRoute();
-            }
-        });
-
-        manualMarkers.push(marker);
-    });
-}
-
 // === GPS Location ===
 
-let locationManagerInited = false;
-let lastKnownLocation = null;
-
-function initGPS() {
-    document.getElementById('gps-btn').addEventListener('click', onGPSClick);
-    initLocationManager();
-}
-
-function initLocationManager() {
-    if (!window.Telegram?.WebApp?.LocationManager) {
-        requestBrowserGPS();
-        return;
-    }
-
-    const lm = Telegram.WebApp.LocationManager;
-    if (lm.isInited) {
-        locationManagerInited = true;
-        tryAutoRequestGPS();
-        return;
-    }
-
-    lm.init(() => {
-        locationManagerInited = true;
-        tryAutoRequestGPS();
-    });
-}
-
-function tryAutoRequestGPS() {
-    const lm = Telegram.WebApp.LocationManager;
-    if (!lm || !locationManagerInited) return;
-
-    // Use cached location immediately if fresh (< 5 min)
-    if (lastKnownLocation && (Date.now() - lastKnownLocation.timestamp < 300000)) {
-        applyGPSLocation(lastKnownLocation.lat, lastKnownLocation.lng);
-        return;
-    }
-
-    if (!lm.isLocationAvailable) {
-        requestBrowserGPS();
-        return;
-    }
-
-    if (lm.isAccessGranted) {
-        requestTelegramLocation();
-    } else if (!lm.isAccessRequested) {
-        requestTelegramLocation();
-    }
-}
-
-function requestTelegramLocation() {
-    const lm = Telegram.WebApp.LocationManager;
-    if (!lm || !locationManagerInited) {
-        requestBrowserGPS();
-        return;
-    }
-
+function detectLocation() {
+    const btn = document.getElementById('gps-btn');
     const status = document.getElementById('location-status');
+    btn.classList.add('loading');
     status.textContent = 'Определение местоположения...';
-    status.className = 'status loading';
+    status.className = 'status';
 
-    lm.getLocation((loc) => {
-        if (loc && loc.latitude) {
-            applyGPSLocation(loc.latitude, loc.longitude);
-        } else if (!lm.isAccessGranted) {
-            status.textContent = 'Геолокация недоступна. Нажмите для настроек';
-            status.className = 'status error';
-            status.onclick = () => {
-                lm.openSettings();
-                status.onclick = null;
-            };
-        } else {
-            requestBrowserGPS();
-        }
-    });
-}
-
-function onGPSClick() {
-    if (window.Telegram?.WebApp?.LocationManager && locationManagerInited) {
-        requestTelegramLocation();
+    if (window.Telegram?.WebApp?.LocationManager) {
+        Telegram.WebApp.LocationManager.getLocation()
+            .then(loc => {
+                if (loc && loc.latitude) {
+                    applyLocation(loc.latitude, loc.longitude);
+                } else {
+                    fallbackBrowserGeo();
+                }
+            })
+            .catch(() => fallbackBrowserGeo())
+            .finally(() => btn.classList.remove('loading'));
     } else {
-        requestBrowserGPS();
+        fallbackBrowserGeo(btn);
     }
 }
 
-function requestBrowserGPS() {
-    if (!navigator.geolocation) return;
+function fallbackBrowserGeo(btn) {
+    if (!navigator.geolocation) {
+        const status = document.getElementById('location-status');
+        status.textContent = 'Геолокация не поддерживается';
+        status.className = 'status error';
+        if (btn) btn.classList.remove('loading');
+        return;
+    }
 
-    const status = document.getElementById('location-status');
-    status.textContent = 'Определение местоположения...';
-    status.className = 'status loading';
-
-    // Stage 1: Fast location (WiFi/cell towers, ~1-2 sec)
     navigator.geolocation.getCurrentPosition(
         pos => {
-            applyGPSLocation(pos.coords.latitude, pos.coords.longitude);
-            // Stage 2: Upgrade to high accuracy in background
-            navigator.geolocation.getCurrentPosition(
-                pos2 => applyGPSLocation(pos2.coords.latitude, pos2.coords.longitude),
-                () => {},
-                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-            );
+            applyLocation(pos.coords.latitude, pos.coords.longitude);
+            document.getElementById('gps-btn').classList.remove('loading');
         },
-        () => {
-            // Fallback: try high accuracy directly
-            navigator.geolocation.getCurrentPosition(
-                pos => applyGPSLocation(pos.coords.latitude, pos.coords.longitude),
-                err => {
-                    status.textContent = 'Не удалось определить местоположение';
-                    status.className = 'status error';
-                },
-                { enableHighAccuracy: true, timeout: 10000 }
-            );
+        err => {
+            const status = document.getElementById('location-status');
+            status.textContent = 'Не удалось определить местоположение';
+            status.className = 'status error';
+            document.getElementById('gps-btn').classList.remove('loading');
         },
-        { enableHighAccuracy: false, timeout: 3000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 10000 }
     );
-}
-
-function applyGPSLocation(lat, lng) {
-    if (routeMode === 'manual' && manualPoints.length > 0) return;
-
-    lastKnownLocation = { lat, lng, timestamp: Date.now() };
-    userLocation = { lat, lng };
-    if (routeMode === 'manual') {
-        addManualPoint(lat, lng);
-    } else {
-        setStartMarker(lat, lng);
-    }
-    map.setView([lat, lng], 15);
-    const status = document.getElementById('location-status');
-    status.textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
-    status.className = 'status success';
-    document.getElementById('generate-btn').disabled = false;
 }
 
 function applyLocation(lat, lng) {
     userLocation = { lat, lng };
     if (routeMode === 'manual') {
         addManualPoint(lat, lng);
-    } else if (routeMode === 'auto') {
+    } else {
         setStartMarker(lat, lng);
     }
     map.setView([lat, lng], 15);
@@ -699,6 +449,7 @@ function initSearch() {
     });
 
     document.getElementById('search-btn').addEventListener('click', searchAddress);
+    document.getElementById('gps-btn').addEventListener('click', detectLocation);
     input.addEventListener('keypress', e => {
         if (e.key === 'Enter') {
             hideSuggestions();
@@ -1563,9 +1314,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTelegram();
     initShare();
     initFeedback();
-    initInsertMode();
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);
     updateUIForMode();
-    initGPS();
 });
