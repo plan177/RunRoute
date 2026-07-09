@@ -61,6 +61,13 @@ function initTabs() {
 
 function onMapClick(e) {
     if (routeMode === 'manual') {
+        if (insertMode && manualPoints.length >= 2) {
+            const insertIdx = findNearestSegmentIdx(e.latlng.lat, e.latlng.lng);
+            if (insertIdx >= 0) {
+                insertManualPointBetween(insertIdx, e.latlng.lat, e.latlng.lng);
+                return;
+            }
+        }
         addManualPoint(e.latlng.lat, e.latlng.lng);
         return;
     }
@@ -106,8 +113,14 @@ function initRouteMode() {
         const prevMode = routeMode;
         routeMode = newMode;
 
-        if (newMode === 'manual' && prevMode === 'auto' && userLocation && !manualPoints.length) {
-            useStartForManual();
+        if (newMode === 'manual') {
+            if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+            if (prevMode === 'auto' && userLocation && !manualPoints.length) {
+                addManualPoint(userLocation.lat, userLocation.lng);
+                const hint = document.getElementById('hint-manual');
+                hint.textContent = 'Точка старта добавлена. Нажмите чтобы поставить вторую';
+                hint.classList.remove('hidden');
+            }
         } else {
             clearManualMode();
         }
@@ -367,6 +380,149 @@ function closeManualRoute() {
     if (manualPoints.length < 2) return;
     manualRouteClosed = true;
     redrawManualPolyline();
+}
+
+// === Insert point between existing ===
+
+let insertMode = false;
+
+function initInsertMode() {
+    document.getElementById('insert-mode-btn').addEventListener('click', toggleInsertMode);
+}
+
+function toggleInsertMode() {
+    insertMode = !insertMode;
+    document.getElementById('insert-mode-btn').classList.toggle('active', insertMode);
+    document.body.classList.toggle('insert-mode', insertMode);
+}
+
+function findNearestSegmentIdx(lat, lng) {
+    if (manualPoints.length < 2) return -1;
+
+    let minDist = Infinity;
+    let insertIdx = -1;
+
+    for (let i = 0; i < manualPoints.length - 1; i++) {
+        const p1 = manualPoints[i];
+        const p2 = manualPoints[i + 1];
+        const dist = distToSegment(lat, lng, p1.lat, p1.lng, p2.lat, p2.lng);
+        if (dist < minDist) {
+            minDist = dist;
+            insertIdx = i + 1;
+        }
+    }
+
+    if (manualRouteClosed && manualPoints.length > 2) {
+        const p1 = manualPoints[manualPoints.length - 1];
+        const p2 = manualPoints[0];
+        const dist = distToSegment(lat, lng, p1.lat, p1.lng, p2.lat, p2.lng);
+        if (dist < minDist) {
+            minDist = dist;
+            insertIdx = manualPoints.length;
+        }
+    }
+
+    return minDist < 0.0003 ? insertIdx : -1;
+}
+
+function distToSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const projX = x1 + t * dx;
+    const projY = y1 + t * dy;
+    return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
+}
+
+function insertManualPointBetween(idx, lat, lng) {
+    manualPoints.splice(idx, 0, { lat, lng });
+    rebuildManualMarkers();
+    redrawManualPolyline();
+    updateManualCount();
+    document.getElementById('generate-btn').disabled = manualPoints.length < 2;
+}
+
+function rebuildManualMarkers() {
+    manualMarkers.forEach(m => map.removeLayer(m));
+    manualMarkers = [];
+
+    manualPoints.forEach((p, i) => {
+        const marker = L.marker([p.lat, p.lng], {
+            icon: L.divIcon({
+                className: 'waypoint-marker',
+                html: '<div class="manual-marker" data-idx="' + i + '">' +
+                      '<span class="manual-marker-num">' + (i + 1) + '</span>' +
+                      '<span class="manual-marker-del" data-idx="' + i + '">&times;</span>' +
+                      '</div>',
+                iconSize: [30, 30], iconAnchor: [15, 15]
+            }),
+            draggable: true
+        }).addTo(map);
+
+        marker.on('click', function(e) {
+            if (marker._justDragged) { marker._justDragged = false; return; }
+            L.DomEvent.stop(e);
+            removeManualPoint(i);
+        });
+
+        marker.on('dragstart', function() {
+            const pos = marker.getLatLng();
+            marker._dragStartPos = { lat: pos.lat, lng: pos.lng };
+        });
+
+        marker.on('drag', function() {
+            const pos = marker.getLatLng();
+            manualPoints[i] = { lat: pos.lat, lng: pos.lng };
+            if (manualPolyline) {
+                const coords = manualPoints.map(p => [p.lat, p.lng]);
+                if (manualRouteClosed) coords.push([manualPoints[0].lat, manualPoints[0].lng]);
+                manualPolyline.setLatLngs(coords);
+            }
+            if (manualRouteClosed) return;
+            const isLast = i === manualPoints.length - 1 && i > 0;
+            if (!isLast) return;
+            const firstPos = manualMarkers[0].getLatLng();
+            const dist = map.latLngToContainerPoint(pos)
+                .distanceTo(map.latLngToContainerPoint(firstPos));
+            const firstEl = manualMarkers[0].getElement();
+            if (firstEl) {
+                firstEl.querySelector('.manual-marker').classList.toggle('snap-highlight', dist < 40);
+            }
+        });
+
+        marker.on('dragend', function() {
+            marker._justDragged = true;
+            const pos = marker.getLatLng();
+            const isLast = i === manualPoints.length - 1 && i > 0;
+            if (isLast && !manualRouteClosed) {
+                const firstPos = manualMarkers[0].getLatLng();
+                const dist = map.latLngToContainerPoint(pos)
+                    .distanceTo(map.latLngToContainerPoint(firstPos));
+                const firstEl = manualMarkers[0].getElement();
+                if (firstEl) {
+                    firstEl.querySelector('.manual-marker').classList.remove('snap-highlight');
+                }
+                if (dist < 40) {
+                    if (marker._dragStartPos) {
+                        marker.setLatLng([marker._dragStartPos.lat, marker._dragStartPos.lng]);
+                        manualPoints[i] = { lat: marker._dragStartPos.lat, lng: marker._dragStartPos.lng };
+                    }
+                    closeManualRoute();
+                    return;
+                }
+            }
+            manualPoints[i] = { lat: pos.lat, lng: pos.lng };
+            redrawManualPolyline();
+            if (currentRoute && manualPoints.length >= 2) {
+                generateManualRoute();
+            }
+        });
+
+        manualMarkers.push(marker);
+    });
 }
 
 // === GPS Location ===
@@ -1314,6 +1470,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTelegram();
     initShare();
     initFeedback();
+    initInsertMode();
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);
     updateUIForMode();
