@@ -35,7 +35,8 @@ function initMap() {
     map = L.map('map', {
         tap: true,
         tapTimeout: 300,
-        bounceAtZoomLimits: false
+        bounceAtZoomLimits: false,
+        doubleClickZoom: false
     }).setView([55.7558, 37.6173], 13);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: false,
@@ -44,6 +45,7 @@ function initMap() {
     }).addTo(map);
     setTimeout(() => map.invalidateSize(), 200);
     map.on('click', onMapClick);
+    map.on('dblclick', onMapDoubleClick);
 }
 
 function initTabs() {
@@ -115,6 +117,7 @@ function initRouteMode() {
         } else if (newMode !== 'manual') {
             clearManualMode();
         }
+        document.body.classList.toggle('manual-mode', newMode === 'manual');
         updateUIForMode();
     }));
     document.getElementById('clear-manual-btn').addEventListener('click', clearManualMode);
@@ -377,6 +380,136 @@ function closeManualRoute() {
     if (manualPoints.length < 2) return;
     manualRouteClosed = true;
     redrawManualPolyline();
+}
+
+// === Insert point between existing (Photoshop-like) ===
+
+function findNearestSegment(lat, lng) {
+    if (manualPoints.length < 2) return null;
+
+    let minDist = Infinity;
+    let insertIdx = manualPoints.length;
+    let nearestLat = lat;
+    let nearestLng = lng;
+
+    for (let i = 0; i < manualPoints.length - 1; i++) {
+        const p1 = manualPoints[i];
+        const p2 = manualPoints[i + 1];
+        const result = nearestPointOnSegment(lat, lng, p1.lat, p1.lng, p2.lat, p2.lng);
+        if (result.dist < minDist) {
+            minDist = result.dist;
+            insertIdx = i + 1;
+            nearestLat = result.lat;
+            nearestLng = result.lng;
+        }
+    }
+
+    // Check closing segment if route is closed
+    if (manualRouteClosed && manualPoints.length > 2) {
+        const p1 = manualPoints[manualPoints.length - 1];
+        const p2 = manualPoints[0];
+        const result = nearestPointOnSegment(lat, lng, p1.lat, p1.lng, p2.lat, p2.lng);
+        if (result.dist < minDist) {
+            minDist = result.dist;
+            insertIdx = manualPoints.length;
+            nearestLat = result.lat;
+            nearestLng = result.lng;
+        }
+    }
+
+    // Threshold: only insert if click is within 20 pixels of the line
+    const pixelDist = minDist * 111000; // rough meters to pixels at zoom 15
+    if (pixelDist > 20) return null;
+
+    return { insertIdx, lat: nearestLat, lng: nearestLng };
+}
+
+function nearestPointOnSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+
+    if (lenSq === 0) {
+        const d = Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+        return { lat: x1, lng: y1, dist: d };
+    }
+
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+
+    const projLat = x1 + t * dx;
+    const projLng = y1 + t * dy;
+    const dist = Math.sqrt((px - projLat) ** 2 + (py - projLng) ** 2);
+
+    return { lat: projLat, lng: projLng, dist };
+}
+
+function insertManualPointAt(idx, lat, lng) {
+    manualPoints.splice(idx, 0, { lat, lng });
+
+    // Remove old markers
+    manualMarkers.forEach(m => map.removeLayer(m));
+    manualMarkers = [];
+
+    // Recreate all markers with new indices
+    manualPoints.forEach((p, i) => {
+        const marker = L.marker([p.lat, p.lng], {
+            icon: L.divIcon({
+                className: 'waypoint-marker',
+                html: '<div class="manual-marker" data-idx="' + i + '">' +
+                      '<span class="manual-marker-num">' + (i + 1) + '</span>' +
+                      '<span class="manual-marker-del" data-idx="' + i + '">&times;</span>' +
+                      '</div>',
+                iconSize: [30, 30], iconAnchor: [15, 15]
+            }),
+            draggable: true
+        }).addTo(map);
+
+        marker.on('click', function(e) {
+            if (marker._justDragged) { marker._justDragged = false; return; }
+            L.DomEvent.stop(e);
+            removeManualPoint(i);
+        });
+
+        marker.on('dragstart', function() {
+            const pos = marker.getLatLng();
+            marker._dragStartPos = { lat: pos.lat, lng: pos.lng };
+        });
+
+        marker.on('drag', function() {
+            const pos = marker.getLatLng();
+            manualPoints[i] = { lat: pos.lat, lng: pos.lng };
+            if (manualPolyline) {
+                const coords = manualPoints.map(p => [p.lat, p.lng]);
+                if (manualRouteClosed) coords.push([manualPoints[0].lat, manualPoints[0].lng]);
+                manualPolyline.setLatLngs(coords);
+            }
+        });
+
+        marker.on('dragend', function() {
+            marker._justDragged = true;
+            const pos = marker.getLatLng();
+            manualPoints[i] = { lat: pos.lat, lng: pos.lng };
+            redrawManualPolyline();
+            if (currentRoute && manualPoints.length >= 2) {
+                generateManualRoute();
+            }
+        });
+
+        manualMarkers.push(marker);
+    });
+
+    redrawManualPolyline();
+    updateManualCount();
+}
+
+function onMapDoubleClick(e) {
+    if (routeMode !== 'manual' || manualPoints.length < 2) return;
+
+    const result = findNearestSegment(e.latlng.lat, e.latlng.lng);
+    if (result) {
+        insertManualPointAt(result.insertIdx, result.lat, result.lng);
+    }
 }
 
 // === GPS Location ===
