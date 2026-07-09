@@ -381,31 +381,51 @@ function closeManualRoute() {
 
 // === GPS Location ===
 
-function autoDetectLocation() {
+function initGPS() {
+    document.getElementById('gps-btn').addEventListener('click', requestLocation);
+}
+
+function requestLocation() {
+    const btn = document.getElementById('gps-btn');
+    btn.classList.add('active');
+
     if (window.Telegram?.WebApp?.LocationManager) {
         Telegram.WebApp.LocationManager.getLocation()
             .then(loc => {
                 if (loc && loc.latitude) {
                     applyLocation(loc.latitude, loc.longitude);
-                } else {
-                    fallbackBrowserGeo();
+                    startWatchingLocation();
                 }
             })
-            .catch(() => fallbackBrowserGeo());
+            .catch(() => requestBrowserGeo());
     } else {
-        fallbackBrowserGeo();
+        requestBrowserGeo();
     }
 }
 
-function fallbackBrowserGeo() {
+function requestBrowserGeo() {
     if (!navigator.geolocation) return;
 
     navigator.geolocation.getCurrentPosition(
         pos => {
             applyLocation(pos.coords.latitude, pos.coords.longitude);
+            startWatchingLocation();
         },
         () => {},
         { enableHighAccuracy: true, timeout: 10000 }
+    );
+}
+
+function startWatchingLocation() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.watchPosition(
+        pos => {
+            if (routeMode === 'auto' && !currentRoute) {
+                applyLocation(pos.coords.latitude, pos.coords.longitude);
+            }
+        },
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 5000 }
     );
 }
 
@@ -1307,5 +1327,5 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);
     updateUIForMode();
-    setTimeout(autoDetectLocation, 50);
+    initGPS();
 });
