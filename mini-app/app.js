@@ -381,17 +381,78 @@ function closeManualRoute() {
 
 // === GPS Location ===
 
+let locationManagerInited = false;
+
 function initGPS() {
     document.getElementById('gps-btn').addEventListener('click', onGPSClick);
+    initLocationManager();
+}
+
+function initLocationManager() {
+    if (!window.Telegram?.WebApp?.LocationManager) {
+        requestBrowserGPS();
+        return;
+    }
+
+    const lm = Telegram.WebApp.LocationManager;
+    if (lm.isInited) {
+        locationManagerInited = true;
+        tryAutoRequestGPS();
+        return;
+    }
+
+    lm.init(() => {
+        locationManagerInited = true;
+        tryAutoRequestGPS();
+    });
+}
+
+function tryAutoRequestGPS() {
+    const lm = Telegram.WebApp.LocationManager;
+    if (!lm || !locationManagerInited) return;
+
+    if (!lm.isLocationAvailable) {
+        requestBrowserGPS();
+        return;
+    }
+
+    if (lm.isAccessGranted) {
+        requestTelegramLocation();
+    } else if (!lm.isAccessRequested) {
+        requestTelegramLocation();
+    }
+}
+
+function requestTelegramLocation() {
+    const lm = Telegram.WebApp.LocationManager;
+    if (!lm || !locationManagerInited) {
+        requestBrowserGPS();
+        return;
+    }
+
+    const status = document.getElementById('location-status');
+    status.textContent = 'Определение местоположения...';
+    status.className = 'status loading';
+
+    lm.getLocation((loc) => {
+        if (loc && loc.latitude) {
+            applyGPSLocation(loc.latitude, loc.longitude);
+        } else if (!lm.isAccessGranted) {
+            status.textContent = 'Геолокация недоступна. Нажмите для настроек';
+            status.className = 'status error';
+            status.onclick = () => {
+                lm.openSettings();
+                status.onclick = null;
+            };
+        } else {
+            requestBrowserGPS();
+        }
+    });
 }
 
 function onGPSClick() {
-    if (window.Telegram?.WebApp?.LocationManager) {
-        Telegram.WebApp.LocationManager.getLocation()
-            .then(loc => {
-                if (loc && loc.latitude) applyGPSLocation(loc.latitude, loc.longitude);
-            })
-            .catch(() => requestBrowserGPS());
+    if (window.Telegram?.WebApp?.LocationManager && locationManagerInited) {
+        requestTelegramLocation();
     } else {
         requestBrowserGPS();
     }
@@ -399,9 +460,17 @@ function onGPSClick() {
 
 function requestBrowserGPS() {
     if (!navigator.geolocation) return;
+
+    const status = document.getElementById('location-status');
+    status.textContent = 'Определение местоположения...';
+    status.className = 'status loading';
+
     navigator.geolocation.getCurrentPosition(
         pos => applyGPSLocation(pos.coords.latitude, pos.coords.longitude),
-        () => {},
+        err => {
+            status.textContent = 'Не удалось определить местоположение';
+            status.className = 'status error';
+        },
         { enableHighAccuracy: true, timeout: 10000 }
     );
 }

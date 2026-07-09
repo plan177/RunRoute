@@ -378,6 +378,12 @@ body {
 
 .status.success { color: var(--primary); }
 .status.error { color: var(--danger); }
+.status.loading { color: var(--text-secondary); animation: pulse 1.5s infinite; }
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
 
 /* Mode Section */
 .mode-section {
