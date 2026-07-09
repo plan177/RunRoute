@@ -971,7 +971,7 @@ async function valhallaRoute(waypoints) {
     const locations = waypoints.map((p, i) => ({
         lat: p.lat,
         lon: p.lon,
-        type: i === 0 || i === waypoints.length - 1 ? 'break' : 'through'
+        type: 'break'
     }));
 
     const body = {
