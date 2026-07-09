@@ -1307,5 +1307,5 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);
     updateUIForMode();
-    setTimeout(autoDetectLocation, 500);
+    setTimeout(autoDetectLocation, 50);
 });
