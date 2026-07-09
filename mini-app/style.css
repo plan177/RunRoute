@@ -1163,6 +1163,19 @@ body {
     50% { box-shadow: 0 0 0 8px rgba(57, 255, 20, 0.15), 0 0 30px rgba(57, 255, 20, 0.7); }
 }
 
+/* Insert mode button */
+#insert-mode-btn.active {
+    background: var(--primary);
+    color: var(--bg);
+    box-shadow: 0 0 12px rgba(57, 255, 20, 0.5);
+}
+
+/* Insert mode - polyline cursor */
+.insert-mode .leaflet-interactive {
+    cursor: crosshair !important;
+    stroke-width: 5 !important;
+}
+
 /* Animations */
 @keyframes fadeIn {
     from { opacity: 0; }
