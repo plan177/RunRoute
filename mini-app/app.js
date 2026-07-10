@@ -1015,14 +1015,14 @@ async function valhallaRoute(waypoints) {
         costing_options: {
             pedestrian: {
                 walking_speed: 5.0,
-                use_roads: 0.8,
-                use_tracks: 0.0,
-                use_living_roads: 0.05,
+                use_roads: 0.9,
+                use_tracks: 0.3,
+                use_living_roads: 0.3,
                 use_highways: 0.0,
                 use_hills: 0.3,
                 use_hills_mountain: 0.3,
-                service_factor: 0.2,
-                alley_factor: 15.0,
+                service_factor: 0.5,
+                alley_factor: 1.0,
                 driveway_factor: 0.0,
                 parking_lot_factor: 0.0
             }
@@ -1105,6 +1105,33 @@ function buildPerfectCircle(lat, lng, targetKm) {
 
 // --- Manual mode ---
 
+function interpolatePoints(p1, p2, numPoints) {
+    const points = [];
+    for (let i = 1; i <= numPoints; i++) {
+        const t = i / (numPoints + 1);
+        points.push({
+            lat: p1.lat + (p2.lat - p1.lat) * t,
+            lon: p1.lon + (p2.lon - p1.lon) * t
+        });
+    }
+    return points;
+}
+
+function addIntermediateWaypoints(waypoints) {
+    if (waypoints.length < 2) return waypoints;
+
+    const result = [waypoints[0]];
+    for (let i = 0; i < waypoints.length - 1; i++) {
+        const p1 = waypoints[i];
+        const p2 = waypoints[i + 1];
+        const dist = haversine(p1.lat, p1.lon, p2.lat, p2.lon);
+        const numIntermediate = Math.min(20, Math.max(1, Math.floor(dist / 0.1)));
+        result.push(...interpolatePoints(p1, p2, numIntermediate));
+        result.push(p2);
+    }
+    return result;
+}
+
 async function generateManualRoute() {
     if (manualPoints.length < 2) return;
     const btn = document.getElementById('generate-btn');
@@ -1112,10 +1139,11 @@ async function generateManualRoute() {
     btn.innerHTML = '<span class="loading"></span> Построение...';
 
     try {
-        const waypoints = manualPoints.map(p => ({ lat: p.lat, lon: p.lng }));
+        let waypoints = manualPoints.map(p => ({ lat: p.lat, lon: p.lng }));
         if (manualRouteClosed && waypoints.length > 1) {
             waypoints.push({ lat: waypoints[0].lat, lon: waypoints[0].lon });
         }
+        waypoints = addIntermediateWaypoints(waypoints);
         const result = await valhallaRoute(waypoints);
 
         if (!result) {
