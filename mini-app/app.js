@@ -122,11 +122,7 @@ function initRouteMode() {
             if (confirmed) {
                 await shareRoute();
             }
-            if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
-            currentRoute = null;
-            document.getElementById('route-info').classList.add('hidden');
-            document.getElementById('regenerate-btn').classList.add('hidden');
-            document.getElementById('share-btn').classList.add('hidden');
+            clearGeneratedRoute();
         }
 
         if (newMode === 'manual') {
@@ -152,12 +148,8 @@ function useStartForManual() {
 
     showConfirmModal('Начать маршрут от текущей точки?').then(confirmed => {
         if (confirmed) {
-            if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+            clearGeneratedRoute();
             if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
-            currentRoute = null;
-            document.getElementById('route-info').classList.add('hidden');
-            document.getElementById('regenerate-btn').classList.add('hidden');
-            document.getElementById('share-btn').classList.add('hidden');
 
             addManualPoint(userLocation.lat, userLocation.lng);
             const hint = document.getElementById('hint-manual');
@@ -220,13 +212,17 @@ function clearManualMode() {
     document.getElementById('insert-mode-btn').classList.remove('active');
     document.body.classList.remove('insert-mode');
     if (manualPolyline) { map.removeLayer(manualPolyline); manualPolyline = null; }
+    clearGeneratedRoute();
+    document.getElementById('generate-btn').disabled = true;
+    updateManualCount();
+}
+
+function clearGeneratedRoute() {
     if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
     currentRoute = null;
-    document.getElementById('generate-btn').disabled = true;
+    document.getElementById('route-info').classList.add('hidden');
     document.getElementById('regenerate-btn').classList.add('hidden');
     document.getElementById('share-btn').classList.add('hidden');
-    document.getElementById('route-info').classList.add('hidden');
-    updateManualCount();
 }
 
 function updateManualCount() {
