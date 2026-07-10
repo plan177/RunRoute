@@ -204,6 +204,9 @@ function clearManualMode() {
     manualMarkers.forEach(m => map.removeLayer(m));
     manualMarkers = [];
     manualRouteClosed = false;
+    insertMode = false;
+    document.getElementById('insert-mode-btn').classList.remove('active');
+    document.body.classList.remove('insert-mode');
     if (manualPolyline) { map.removeLayer(manualPolyline); manualPolyline = null; }
     if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
     currentRoute = null;
@@ -528,20 +531,6 @@ function applyGPSLocation(lat, lng) {
     document.getElementById('generate-btn').disabled = false;
 }
 
-function applyLocation(lat, lng) {
-    userLocation = { lat, lng };
-    if (routeMode === 'manual') {
-        addManualPoint(lat, lng);
-    } else if (routeMode === 'auto') {
-        setStartMarker(lat, lng);
-    }
-    map.setView([lat, lng], 15);
-    const status = document.getElementById('location-status');
-    status.textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
-    status.className = 'status success';
-    document.getElementById('generate-btn').disabled = false;
-}
-
 // === Insert point between existing ===
 
 let insertMode = false;
@@ -698,40 +687,16 @@ function detectLocation() {
         Telegram.WebApp.LocationManager.getLocation()
             .then(loc => {
                 if (loc && loc.latitude) {
-                    applyLocation(loc.latitude, loc.longitude);
+                    applyGPSLocation(loc.latitude, loc.longitude);
                 } else {
-                    fallbackBrowserGeo();
+                    requestBrowserGPS();
                 }
             })
-            .catch(() => fallbackBrowserGeo())
+            .catch(() => requestBrowserGPS())
             .finally(() => btn.classList.remove('loading'));
     } else {
-        fallbackBrowserGeo(btn);
+        requestBrowserGPS();
     }
-}
-
-function fallbackBrowserGeo(btn) {
-    if (!navigator.geolocation) {
-        const status = document.getElementById('location-status');
-        status.textContent = 'Геолокация не поддерживается';
-        status.className = 'status error';
-        if (btn) btn.classList.remove('loading');
-        return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-        pos => {
-            applyLocation(pos.coords.latitude, pos.coords.longitude);
-            document.getElementById('gps-btn').classList.remove('loading');
-        },
-        err => {
-            const status = document.getElementById('location-status');
-            status.textContent = 'Не удалось определить местоположение';
-            status.className = 'status error';
-            document.getElementById('gps-btn').classList.remove('loading');
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
-    );
 }
 
 function applyLocation(lat, lng) {
@@ -765,7 +730,6 @@ function initSearch() {
     });
 
     document.getElementById('search-btn').addEventListener('click', searchAddress);
-    document.getElementById('gps-btn').addEventListener('click', detectLocation);
     input.addEventListener('keypress', e => {
         if (e.key === 'Enter') {
             hideSuggestions();
@@ -1395,7 +1359,8 @@ function downloadGPX() {
 function formatTime(totalSec) {
     const h = Math.floor(totalSec / 3600);
     const m = Math.floor((totalSec % 3600) / 60);
-    const s = Math.round(totalSec % 60);
+    let s = Math.round(totalSec % 60);
+    if (s === 60) { s = 0; }
     if (h > 0) return h + ':' + pad(m) + ':' + pad(s);
     return m + ':' + pad(s);
 }
@@ -1480,7 +1445,14 @@ function startTracking() {
 
     trackingWatchId = navigator.geolocation.watchPosition(
         pos => onTrackingPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
-        () => {},
+        err => {
+            console.warn('Tracking GPS error:', err.message);
+            const status = document.getElementById('track-status');
+            if (status) {
+                status.textContent = 'GPS недоступен. Проверьте разрешения.';
+                status.className = 'track-status error';
+            }
+        },
         { enableHighAccuracy: true, maximumAge: 1000 }
     );
 }
@@ -1491,6 +1463,9 @@ function stopTracking() {
         navigator.geolocation.clearWatch(trackingWatchId);
         trackingWatchId = null;
     }
+
+    if (trackingMarker) { map.removeLayer(trackingMarker); trackingMarker = null; }
+    if (trackingPolyline) { map.removeLayer(trackingPolyline); trackingPolyline = null; }
 
     document.getElementById('track-start-btn').classList.remove('hidden');
     document.getElementById('track-stop-btn').classList.add('hidden');
