@@ -956,8 +956,8 @@ async function generateAutoRoute() {
 }
 
 async function buildPreciseRoute(lat, lng, targetKm) {
-    const MAX_ITERATIONS = 15;
-    const TOLERANCE_KM = 0.1;
+    const MAX_ITERATIONS = 8;
+    const TOLERANCE_KM = 0.3;
     let bestRoute = null;
     let bestDiff = Infinity;
     let radiusKm = targetKm / (2 * Math.PI) * 1.2;
