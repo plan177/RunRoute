@@ -117,6 +117,13 @@ function initRouteMode() {
             stopTracking();
         }
 
+        if (newMode !== 'track' && prevMode !== newMode && currentRoute) {
+            const confirmed = await showConfirmModal('Маршрут будет удалён. Поделиться перед удалением?');
+            if (confirmed) {
+                await shareRoute();
+            }
+        }
+
         if (newMode === 'manual') {
             if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
             if (prevMode === 'auto' && userLocation && !manualPoints.length) {
@@ -125,13 +132,7 @@ function initRouteMode() {
                 hint.textContent = 'Точка старта добавлена. Нажмите чтобы поставить вторую';
                 hint.classList.remove('hidden');
             }
-        } else if (newMode !== 'manual' && newMode !== 'track') {
-            if (currentRoute) {
-                const confirmed = await showConfirmModal('Маршрут будет удалён. Поделиться перед удалением?');
-                if (confirmed) {
-                    await shareRoute();
-                }
-            }
+        } else if (newMode !== 'manual') {
             clearManualMode();
         }
         updateUIForMode();
