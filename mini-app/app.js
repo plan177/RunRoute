@@ -125,7 +125,7 @@ function initRouteMode() {
                 hint.textContent = 'Точка старта добавлена. Нажмите чтобы поставить вторую';
                 hint.classList.remove('hidden');
             }
-        } else if (newMode !== 'manual') {
+        } else if (newMode !== 'manual' && newMode !== 'track') {
             if (currentRoute) {
                 const confirmed = await showConfirmModal('Маршрут будет удалён. Поделиться перед удалением?');
                 if (confirmed) {
