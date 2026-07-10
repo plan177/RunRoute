@@ -105,7 +105,7 @@ function setStartMarker(lat, lng) {
 // === Route Mode Switch ===
 
 function initRouteMode() {
-    document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', e => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', async e => {
         const btn = e.target.closest('.mode-btn');
         document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
         btn.classList.add('active');
@@ -115,6 +115,18 @@ function initRouteMode() {
 
         if (tracking && newMode !== 'track') {
             stopTracking();
+        }
+
+        if (newMode !== 'track' && prevMode !== newMode && currentRoute) {
+            const confirmed = await showConfirmModal('Маршрут будет удалён. Поделиться перед удалением?');
+            if (confirmed) {
+                await shareRoute();
+            }
+            if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+            currentRoute = null;
+            document.getElementById('route-info').classList.add('hidden');
+            document.getElementById('regenerate-btn').classList.add('hidden');
+            document.getElementById('share-btn').classList.add('hidden');
         }
 
         if (newMode === 'manual') {
