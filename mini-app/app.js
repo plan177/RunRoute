@@ -1125,7 +1125,7 @@ function addIntermediateWaypoints(waypoints) {
         const p1 = waypoints[i];
         const p2 = waypoints[i + 1];
         const dist = haversine(p1.lat, p1.lon, p2.lat, p2.lon);
-        const numIntermediate = Math.max(1, Math.floor(dist / 0.1));
+        const numIntermediate = Math.min(20, Math.max(1, Math.floor(dist / 0.1)));
         result.push(...interpolatePoints(p1, p2, numIntermediate));
         result.push(p2);
     }
