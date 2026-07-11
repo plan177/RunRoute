@@ -1115,7 +1115,7 @@ function buildPerfectCircle(lat, lng, targetKm) {
 
 // --- Manual mode ---
 
-const { haversine, haversineArr, interpolatePoints, addIntermediateWaypoints } = window.RunRouteUtils;
+const { haversine, haversineArr, interpolatePoints, addIntermediateWaypoints, escapeXml, makeGPX } = window.RunRouteUtils;
 
 async function generateManualRoute() {
     if (manualPoints.length < 2) return;
@@ -1306,56 +1306,6 @@ function renderSplits(distKm, paceSec) {
 }
 
 // === Utilities ===
-
-function makeGPX(points, name) {
-    const exportTime = Date.now();
-    const exportISO = new Date(exportTime).toISOString();
-    let gpx = '<?xml version="1.0" encoding="UTF-8"?>\n';
-    gpx += '<gpx version="1.1" creator="RunRouteBot" ';
-    gpx += 'xmlns="http://www.topografix.com/GPX/1/1" ';
-    gpx += 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ';
-    gpx += 'xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">\n';
-    gpx += '  <metadata>\n';
-    gpx += '    <name>' + escapeXml(name) + '</name>\n';
-    gpx += '    <time>' + exportISO + '</time>\n';
-    gpx += '  </metadata>\n';
-    gpx += '  <trk>\n';
-    gpx += '    <name>' + escapeXml(name) + '</name>\n';
-    gpx += '    <type>running</type>\n';
-    gpx += '    <trkseg>\n';
-    let fallbackStart = null;
-    for (let i = 0; i < points.length; i++) {
-        const p = points[i];
-        let t;
-        const hasValidTime = p.time !== null && p.time !== undefined && !isNaN(p.time) && isFinite(p.time);
-        if (hasValidTime) {
-            const date = new Date(p.time);
-            if (!isNaN(date.getTime()) && p.time <= exportTime + 1000) {
-                t = date.toISOString();
-            }
-        }
-        if (!t) {
-            if (fallbackStart === null) {
-                fallbackStart = exportTime - Math.max(0, points.length - 1) * 5000;
-            }
-            const fallbackTime = fallbackStart + i * 5000;
-            t = new Date(fallbackTime).toISOString();
-        }
-        gpx += '      <trkpt lat="' + p.lat.toFixed(6) + '" lon="' + p.lng.toFixed(6) + '">\n';
-        gpx += '        <ele>0</ele>\n';
-        gpx += '        <time>' + t + '</time>\n';
-        gpx += '      </trkpt>\n';
-    }
-    gpx += '    </trkseg>\n';
-    gpx += '  </trk>\n';
-    gpx += '</gpx>';
-    return gpx;
-}
-
-function escapeXml(s) {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
-}
 
 function downloadGPX() {
     if (!currentRoute || !currentRoute.gpx) return;
