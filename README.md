@@ -111,6 +111,10 @@ npx serve -p 8080
 - [ ] Manual → Auto: маршрут очищается
 - [ ] Любой → Track: не показывается предложение поделиться маршрутом; проверить корректное включение режима GPS-трекинга
 - [ ] При переключении Auto/Manual предлагается поделиться маршрутом
+- [ ] Повторный клик по активному режиму ничего не сбрасывает
+- [ ] Track → Auto/Manual останавливает активную запись
+- [ ] Переход в Track не предлагает поделиться
+- [ ] Переход из Track с завершённым маршрутом в Auto/Manual предлагает поделиться перед удалением
 
 ### GPS-трекинг
 - [ ] Начало трекинга (кнопка "Старт")
@@ -134,7 +138,7 @@ npx serve -p 8080
 Запуск всех модульных тестов:
 
 ```bash
-node --test tests/route-utils.test.js tests/makeGPX.test.js tests/pace-utils.test.js
+node --test tests/route-utils.test.js tests/makeGPX.test.js tests/pace-utils.test.js tests/mode-utils.test.js
 ```
 
 Тесты используют встроенный `node:test` и `node:assert/strict`. Дополнительные зависимости не требуются.

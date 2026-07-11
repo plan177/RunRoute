@@ -108,35 +108,54 @@ function setStartMarker(lat, lng) {
 function initRouteMode() {
     document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', async e => {
         const btn = e.target.closest('.mode-btn');
-        document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
-        btn.classList.add('active');
-        const newMode = btn.dataset.mode;
-        const prevMode = routeMode;
-        routeMode = newMode;
+        const nextMode = btn.dataset.mode;
 
-        if (tracking && newMode !== 'track') {
+        const plan = getModeTransitionPlan({
+            previousMode: routeMode,
+            nextMode: nextMode,
+            trackingActive: tracking,
+            hasGeneratedRoute: !!currentRoute,
+            hasUserLocation: !!userLocation,
+            manualPointCount: manualPoints.length
+        });
+
+        if (!plan.valid) return;
+
+        if (!plan.modeChanged) return;
+
+        if (plan.stopTracking) {
             stopTracking();
         }
 
-        if (newMode !== 'track' && prevMode !== newMode && currentRoute) {
+        if (plan.offerShareBeforeClear) {
             const confirmed = await showConfirmModal('Маршрут будет удалён. Поделиться перед удалением?');
             if (confirmed) {
                 await shareRoute();
             }
+        }
+
+        if (plan.clearGeneratedRoute) {
             clearGeneratedRoute();
         }
 
-        if (newMode === 'manual') {
-            if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
-            if (prevMode === 'auto' && userLocation && !manualPoints.length) {
-                addManualPoint(userLocation.lat, userLocation.lng);
-                const hint = document.getElementById('hint-manual');
-                hint.textContent = 'Точка старта добавлена. Нажмите чтобы поставить вторую';
-                hint.classList.remove('hidden');
-            }
-        } else if (newMode !== 'manual') {
+        if (plan.clearManualMode) {
             clearManualMode();
         }
+
+        if (plan.removeStartMarker) {
+            if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+        }
+
+        if (plan.seedManualStartPoint) {
+            addManualPoint(userLocation.lat, userLocation.lng);
+            const hint = document.getElementById('hint-manual');
+            hint.textContent = 'Точка старта добавлена. Нажмите чтобы поставить вторую';
+            hint.classList.remove('hidden');
+        }
+
+        document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
+        btn.classList.add('active');
+        routeMode = nextMode;
         updateUIForMode();
     }));
     document.getElementById('clear-manual-btn').addEventListener('click', clearManualMode);
@@ -1117,6 +1136,7 @@ function buildPerfectCircle(lat, lng, targetKm) {
 
 const { haversine, haversineArr, interpolatePoints, addIntermediateWaypoints, escapeXml, makeGPX } = window.RunRouteUtils;
 const { formatDuration, calculatePaceMetrics, buildSplits } = window.RunRoutePaceUtils;
+const { getModeTransitionPlan } = window.RunRouteModeUtils;
 
 async function generateManualRoute() {
     if (manualPoints.length < 2) return;
