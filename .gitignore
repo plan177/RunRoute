@@ -9,14 +9,9 @@
 .claude-flow/
 .mcp.json
 .swarm/
-CLAUDE.md
 
 # Logs
 bot.log
-
-# Documentation
-README.md
-docs/
 
 # Python
 __pycache__/
