@@ -108,38 +108,66 @@ function setStartMarker(lat, lng) {
 function initRouteMode() {
     document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', async e => {
         const btn = e.target.closest('.mode-btn');
-        document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
-        btn.classList.add('active');
-        const newMode = btn.dataset.mode;
-        const prevMode = routeMode;
-        routeMode = newMode;
+        const nextMode = btn.dataset.mode;
 
-        if (tracking && newMode !== 'track') {
+        let plan = getModeTransitionPlan({
+            previousMode: routeMode,
+            nextMode: nextMode,
+            trackingActive: tracking,
+            hasGeneratedRoute: !!currentRoute,
+            hasUserLocation: !!userLocation,
+            manualPointCount: manualPoints.length
+        });
+
+        if (!plan.valid) return;
+
+        if (!plan.modeChanged) return;
+
+        if (plan.stopTracking) {
             stopTracking();
+            // stopTracking may synchronously create currentRoute from recorded points
+            plan = getModeTransitionPlan({
+                previousMode: routeMode,
+                nextMode: nextMode,
+                trackingActive: tracking,
+                hasGeneratedRoute: !!currentRoute,
+                hasUserLocation: !!userLocation,
+                manualPointCount: manualPoints.length
+            });
         }
 
-        if (newMode !== 'track' && prevMode !== newMode && currentRoute) {
+        if (plan.offerShareBeforeClear) {
             const confirmed = await showConfirmModal('Маршрут будет удалён. Поделиться перед удалением?');
             if (confirmed) {
                 await shareRoute();
             }
+        }
+
+        if (plan.clearGeneratedRoute) {
             clearGeneratedRoute();
         }
 
-        if (newMode === 'manual') {
-            if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
-            if (prevMode === 'auto' && userLocation && !manualPoints.length) {
-                addManualPoint(userLocation.lat, userLocation.lng);
-                const hint = document.getElementById('hint-manual');
-                hint.textContent = 'Точка старта добавлена. Нажмите чтобы поставить вторую';
-                hint.classList.remove('hidden');
-            }
-        } else if (newMode !== 'manual') {
-            clearManualMode();
+        if (plan.clearManualMode) {
+            clearManualMode(false);
         }
+
+        if (plan.removeStartMarker) {
+            if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+        }
+
+        if (plan.seedManualStartPoint) {
+            addManualPoint(userLocation.lat, userLocation.lng);
+            const hint = document.getElementById('hint-manual');
+            hint.textContent = 'Точка старта добавлена. Нажмите чтобы поставить вторую';
+            hint.classList.remove('hidden');
+        }
+
+        document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
+        btn.classList.add('active');
+        routeMode = nextMode;
         updateUIForMode();
     }));
-    document.getElementById('clear-manual-btn').addEventListener('click', clearManualMode);
+    document.getElementById('clear-manual-btn').addEventListener('click', () => clearManualMode(true));
     document.getElementById('undo-manual-btn').addEventListener('click', undoLastPoint);
     document.getElementById('close-route-btn').addEventListener('click', closeManualRoute);
 }
@@ -204,7 +232,7 @@ function updateUIForMode() {
     document.getElementById('share-btn').classList.add('hidden');
 }
 
-function clearManualMode() {
+function clearManualMode(clearGenerated = true) {
     manualPoints = [];
     manualMarkers.forEach(m => map.removeLayer(m));
     manualMarkers = [];
@@ -213,7 +241,9 @@ function clearManualMode() {
     document.getElementById('insert-mode-btn').classList.remove('active');
     document.body.classList.remove('insert-mode');
     if (manualPolyline) { map.removeLayer(manualPolyline); manualPolyline = null; }
-    clearGeneratedRoute();
+    if (clearGenerated) {
+        clearGeneratedRoute();
+    }
     document.getElementById('generate-btn').disabled = true;
     updateManualCount();
 }
@@ -1117,6 +1147,7 @@ function buildPerfectCircle(lat, lng, targetKm) {
 
 const { haversine, haversineArr, interpolatePoints, addIntermediateWaypoints, escapeXml, makeGPX } = window.RunRouteUtils;
 const { formatDuration, calculatePaceMetrics, buildSplits } = window.RunRoutePaceUtils;
+const { getModeTransitionPlan } = window.RunRouteModeUtils;
 
 async function generateManualRoute() {
     if (manualPoints.length < 2) return;
