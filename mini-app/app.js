@@ -18,6 +18,7 @@ let trackingLastValid = null;
 const TRACK_MIN_DIST_M = 5;
 const TRACK_MAX_SPEED_KMH = 20;
 const TRACK_SMOOTH_N = 3;
+const TRACK_MAX_ACCURACY_M = 50;
 
 // init moved to bottom of file
 
@@ -925,6 +926,7 @@ async function generateRoute() {
 }
 
 function regenerateRoute() {
+    if (routeMode === 'track') return;
     if (routeMode === 'manual') {
         generateManualRoute();
     } else {
@@ -1154,10 +1156,14 @@ async function generateManualRoute() {
     }
 }
 
-function showRouteButtons() {
-    document.getElementById('regenerate-btn').classList.remove('hidden');
-    document.getElementById('share-btn').classList.remove('hidden');
+function showRouteButtons(mode) {
     document.getElementById('route-info').classList.remove('hidden');
+    document.getElementById('share-btn').classList.remove('hidden');
+    if (mode === 'track') {
+        document.getElementById('regenerate-btn').classList.add('hidden');
+    } else {
+        document.getElementById('regenerate-btn').classList.remove('hidden');
+    }
 }
 
 function displayRoute(route) {
@@ -1316,10 +1322,20 @@ function makeGPX(points, name) {
     gpx += '    <name>' + escapeXml(name) + '</name>\n';
     gpx += '    <type>running</type>\n';
     gpx += '    <trkseg>\n';
+    let lastTime = null;
     for (let i = 0; i < points.length; i++) {
         const p = points[i];
-        const offset = i * 5;
-        const t = new Date(Date.now() + offset * 1000).toISOString();
+        let t;
+        if (p.time && p.time > 0) {
+            t = new Date(p.time).toISOString();
+            lastTime = p.time;
+        } else if (lastTime !== null) {
+            lastTime += 5000;
+            t = new Date(lastTime).toISOString();
+        } else {
+            t = new Date(Date.now() + i * 5000).toISOString();
+            lastTime = Date.now() + i * 5000;
+        }
         gpx += '      <trkpt lat="' + p.lat.toFixed(6) + '" lon="' + p.lng.toFixed(6) + '">\n';
         gpx += '        <ele>0</ele>\n';
         gpx += '        <time>' + t + '</time>\n';
@@ -1437,7 +1453,7 @@ function startTracking() {
     document.getElementById('track-stop-btn').classList.remove('hidden');
 
     trackingWatchId = navigator.geolocation.watchPosition(
-        pos => onTrackingPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
+        pos => onTrackingPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, pos.timestamp),
         err => {
             console.warn('Tracking GPS error:', err.message);
             const status = document.getElementById('track-status');
@@ -1476,26 +1492,40 @@ function stopTracking() {
         gpx: makeGPX(trackingPoints, 'Live Track ' + totalDist.toFixed(1) + 'km')
     };
     displayRoute(currentRoute);
-    showRouteButtons();
+    showRouteButtons('track');
 }
 
-function onTrackingPosition(lat, lng, accuracy) {
+function onTrackingPosition(lat, lng, accuracy, timestamp) {
     if (!tracking) return;
 
-    const point = { lat, lng };
+    if (accuracy > TRACK_MAX_ACCURACY_M) {
+        console.warn('GPS point rejected: accuracy', accuracy, 'm >', TRACK_MAX_ACCURACY_M, 'm');
+        return;
+    }
+
+    const point = { lat, lng, time: timestamp || Date.now(), accuracy };
 
     if (trackingLastValid) {
+        if (timestamp && trackingLastValid.time && timestamp <= trackingLastValid.time) {
+            console.warn('GPS point rejected: timestamp not advancing');
+            return;
+        }
+
         const dist = haversine(trackingLastValid.lat, trackingLastValid.lng, lat, lng);
-        const timeSec = (Date.now() - trackingLastValid.time) / 1000;
+        const timeMs = timestamp && trackingLastValid.time ? timestamp - trackingLastValid.time : Date.now() - trackingLastValid.time;
+        const timeSec = timeMs / 1000;
         if (timeSec > 0) {
             const speedKmh = (dist / timeSec) * 3600;
-            if (speedKmh > TRACK_MAX_SPEED_KMH) return;
+            if (speedKmh > TRACK_MAX_SPEED_KMH) {
+                console.warn('GPS point rejected: speed', speedKmh.toFixed(1), 'km/h >', TRACK_MAX_SPEED_KMH, 'km/h');
+                return;
+            }
         }
         if (dist * 1000 < TRACK_MIN_DIST_M) return;
     }
 
     const smoothed = smoothPoint(point);
-    trackingLastValid = { lat: smoothed.lat, lng: smoothed.lng, time: Date.now() };
+    trackingLastValid = { lat: smoothed.lat, lng: smoothed.lng, time: point.time, accuracy: point.accuracy };
     trackingPoints.push(smoothed);
 
     if (trackingPolyline) map.removeLayer(trackingPolyline);
@@ -1525,7 +1555,7 @@ function smoothPoint(point) {
     recent.push(point);
     const avgLat = recent.reduce((s, p) => s + p.lat, 0) / recent.length;
     const avgLng = recent.reduce((s, p) => s + p.lng, 0) / recent.length;
-    return { lat: avgLat, lng: avgLng };
+    return { lat: avgLat, lng: avgLng, time: point.time, accuracy: point.accuracy };
 }
 
 // === Feedback ===
