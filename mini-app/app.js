@@ -1308,7 +1308,8 @@ function renderSplits(distKm, paceSec) {
 // === Utilities ===
 
 function makeGPX(points, name) {
-    const now = new Date().toISOString();
+    const exportTime = Date.now();
+    const exportISO = new Date(exportTime).toISOString();
     let gpx = '<?xml version="1.0" encoding="UTF-8"?>\n';
     gpx += '<gpx version="1.1" creator="RunRouteBot" ';
     gpx += 'xmlns="http://www.topografix.com/GPX/1/1" ';
@@ -1316,25 +1317,29 @@ function makeGPX(points, name) {
     gpx += 'xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">\n';
     gpx += '  <metadata>\n';
     gpx += '    <name>' + escapeXml(name) + '</name>\n';
-    gpx += '    <time>' + now + '</time>\n';
+    gpx += '    <time>' + exportISO + '</time>\n';
     gpx += '  </metadata>\n';
     gpx += '  <trk>\n';
     gpx += '    <name>' + escapeXml(name) + '</name>\n';
     gpx += '    <type>running</type>\n';
     gpx += '    <trkseg>\n';
-    let lastTime = null;
+    let fallbackStart = null;
     for (let i = 0; i < points.length; i++) {
         const p = points[i];
         let t;
-        if (p.time && p.time > 0) {
-            t = new Date(p.time).toISOString();
-            lastTime = p.time;
-        } else if (lastTime !== null) {
-            lastTime += 5000;
-            t = new Date(lastTime).toISOString();
-        } else {
-            t = new Date(Date.now() + i * 5000).toISOString();
-            lastTime = Date.now() + i * 5000;
+        const hasValidTime = p.time !== null && p.time !== undefined && !isNaN(p.time) && isFinite(p.time);
+        if (hasValidTime) {
+            const date = new Date(p.time);
+            if (!isNaN(date.getTime()) && p.time <= exportTime + 1000) {
+                t = date.toISOString();
+            }
+        }
+        if (!t) {
+            if (fallbackStart === null) {
+                fallbackStart = exportTime - Math.max(0, points.length - 1) * 5000;
+            }
+            const fallbackTime = fallbackStart + i * 5000;
+            t = new Date(fallbackTime).toISOString();
         }
         gpx += '      <trkpt lat="' + p.lat.toFixed(6) + '" lon="' + p.lng.toFixed(6) + '">\n';
         gpx += '        <ele>0</ele>\n';
