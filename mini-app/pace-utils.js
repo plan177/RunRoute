@@ -44,17 +44,13 @@
 
         const distanceKm = distanceMeters / 1000;
         const paceSecondsPerKm = totalSeconds / distanceKm;
-        const paceMin = Math.floor(paceSecondsPerKm / 60);
-        const paceRem = Math.round(paceSecondsPerKm % 60);
-        const paceText = paceMin + ':' + pad(paceRem === 60 ? 0 : paceRem);
+        const paceText = formatDuration(paceSecondsPerKm);
 
         const speedKmh = distanceKm / (totalSeconds / 3600);
         const speedText = speedKmh.toFixed(1);
 
         const lapSeconds = paceSecondsPerKm * (lapDistanceMeters / 1000);
-        const lapMin = Math.floor(lapSeconds / 60);
-        const lapRem = Math.round(lapSeconds % 60);
-        const lapText = lapMin + ':' + pad(lapRem === 60 ? 0 : lapRem);
+        const lapText = formatDuration(lapSeconds);
 
         return {
             distanceKm,

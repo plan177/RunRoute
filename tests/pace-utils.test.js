@@ -57,6 +57,32 @@ describe('calculatePaceMetrics', () => {
         assert.equal(calculatePaceMetrics(5000, Infinity, 100), null);
         assert.equal(calculatePaceMetrics('5000', 1500, 100), null);
     });
+
+    it('округление 299.6 секунд до 5:00', () => {
+        const result = calculatePaceMetrics(1000, 299.6, 100);
+        assert.ok(result);
+        assert.equal(result.paceText, '5:00');
+    });
+
+    it('округление lapSeconds 59.6 до 1:00', () => {
+        const result = calculatePaceMetrics(1000, 59.6, 1000);
+        assert.ok(result);
+        assert.equal(result.lapText, '1:00');
+    });
+
+    it('отсутствие :60 в paceText и lapText', () => {
+        const cases = [
+            [5000, 299.6, 100],
+            [1000, 59.6, 1000],
+            [5000, 1799.6, 100]
+        ];
+        for (const [dist, time, lap] of cases) {
+            const result = calculatePaceMetrics(dist, time, lap);
+            assert.ok(result);
+            assert.ok(!result.paceText.includes(':60'), `paceText ${result.paceText} не должен содержать :60`);
+            assert.ok(!result.lapText.includes(':60'), `lapText ${result.lapText} не должен содержать :60`);
+        }
+    });
 });
 
 describe('formatDuration', () => {
