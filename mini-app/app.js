@@ -1116,6 +1116,7 @@ function buildPerfectCircle(lat, lng, targetKm) {
 // --- Manual mode ---
 
 const { haversine, haversineArr, interpolatePoints, addIntermediateWaypoints, escapeXml, makeGPX } = window.RunRouteUtils;
+const { formatDuration, calculatePaceMetrics, buildSplits } = window.RunRoutePaceUtils;
 
 async function generateManualRoute() {
     if (manualPoints.length < 2) return;
@@ -1257,48 +1258,29 @@ function calcPace() {
     const m = parseInt(document.getElementById('pace-m').value) || 0;
     const s = parseInt(document.getElementById('pace-s').value) || 0;
     const totalSec = h * 3600 + m * 60 + s;
-    if (totalSec <= 0 || selectedPaceDist <= 0) return;
 
-    const distKm = selectedPaceDist / 1000;
-    const paceSec = totalSec / distKm;
-    const paceMin = Math.floor(paceSec / 60);
-    const paceRem = Math.round(paceSec % 60);
-    document.getElementById('result-pace').textContent = paceMin + ':' + pad(paceRem);
+    const metrics = calculatePaceMetrics(selectedPaceDist, totalSec, selectedLapDist);
+    if (!metrics) return;
 
-    const speed = distKm / (totalSec / 3600);
-    document.getElementById('result-speed').textContent = speed.toFixed(1);
+    document.getElementById('result-pace').textContent = metrics.paceText;
+    document.getElementById('result-speed').textContent = metrics.speedText;
+    document.getElementById('result-lap').textContent = metrics.lapText;
 
-    const lapSec = paceSec * (selectedLapDist / 1000);
-    const lapMin = Math.floor(lapSec / 60);
-    const lapRem = Math.round(lapSec % 60);
-    document.getElementById('result-lap').textContent = lapMin + ':' + pad(lapRem);
-
-    renderSplits(distKm, paceSec);
+    renderSplits(metrics.distanceKm, metrics.paceSecondsPerKm);
 }
 
 function renderSplits(distKm, paceSec) {
     const container = document.getElementById('splits-container');
     if (!container) return;
 
-    const fullKm = Math.floor(distKm);
-    const partialKm = distKm - fullKm;
+    const splits = buildSplits(distKm * 1000, paceSec);
 
     let html = '<div class="splits-table">';
     html += '<div class="split-header"><span>Км</span><span>Время</span><span>Суммарно</span></div>';
 
-    let cumulative = 0;
-    for (let km = 1; km <= fullKm; km++) {
-        cumulative += paceSec;
-        html += '<div class="split-row"><span>' + km + '</span><span>' +
-            formatTime(paceSec) + '</span><span>' + formatTime(cumulative) + '</span></div>';
-    }
-
-    if (partialKm > 0.01) {
-        const partialTime = paceSec * partialKm;
-        cumulative += partialTime;
-        html += '<div class="split-row partial"><span>' + fullKm + '+' +
-            partialKm.toFixed(1) + '</span><span>' + formatTime(partialTime) +
-            '</span><span>' + formatTime(cumulative) + '</span></div>';
+    for (const split of splits) {
+        html += '<div class="split-row' + (split.partial ? ' partial' : '') + '"><span>' + split.label + '</span><span>' +
+            split.segmentText + '</span><span>' + split.cumulativeText + '</span></div>';
     }
 
     html += '</div>';
@@ -1319,17 +1301,6 @@ function downloadGPX() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 }
-
-function formatTime(totalSec) {
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    let s = Math.round(totalSec % 60);
-    if (s === 60) { s = 0; }
-    if (h > 0) return h + ':' + pad(m) + ':' + pad(s);
-    return m + ':' + pad(s);
-}
-
-function pad(n) { return n < 10 ? '0' + n : '' + n; }
 
 // === Share ===
 
