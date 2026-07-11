@@ -131,10 +131,10 @@ npx serve -p 8080
 
 ## Тесты
 
-Запуск тестов геометрических функций:
+Запуск всех модульных тестов:
 
 ```bash
-node --test tests/route-utils.test.js
+node --test tests/route-utils.test.js tests/makeGPX.test.js tests/pace-utils.test.js
 ```
 
 Тесты используют встроенный `node:test` и `node:assert/strict`. Дополнительные зависимости не требуются.
