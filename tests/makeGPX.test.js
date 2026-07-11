@@ -124,6 +124,22 @@ describe('makeGPX', () => {
         assert.ok(times[times.length - 1] <= new Date(), 'Последнее время не позже момента экспорта');
     });
 
+    it('точка с exportTime + 500мс считается будущей и получает fallback', () => {
+        const now = Date.now();
+        const points = [
+            { lat: 55.7558, lng: 37.6173, time: now - 5000 },
+            { lat: 55.7559, lng: 37.6174, time: now + 500 },
+            { lat: 55.7560, lng: 37.6175, time: now }
+        ];
+        const gpx = makeGPX(points, 'Test Track');
+        const times = parseTrackTimesFromGPX(gpx);
+        assert.equal(times.length, 3);
+        for (let i = 1; i < times.length; i++) {
+            assert.ok(times[i] >= times[i - 1], 'Время должно идти по возрастанию');
+        }
+        assert.ok(times[times.length - 1] <= new Date(), 'Последнее время не позже момента экспорта');
+    });
+
     it('NaN, Infinity, -1 и строка invalid', () => {
         const points = [
             { lat: 55.7558, lng: 37.6173, time: NaN },

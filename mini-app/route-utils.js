@@ -88,7 +88,7 @@
             let t = null;
             if (isValidTimestamp(p.time)) {
                 const date = new Date(p.time);
-                if (!isNaN(date.getTime()) && p.time <= exportTime + 1000) {
+                if (!isNaN(date.getTime()) && p.time <= exportTime) {
                     if (lastTime === null || p.time >= lastTime) {
                         t = date.toISOString();
                         lastTime = p.time;
