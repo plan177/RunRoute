@@ -349,4 +349,61 @@ describe('инварианты', () => {
             assert.equal(plan.seedManualStartPoint, false, `seedManualStartPoint=false для ${mode} → ${mode}`);
         }
     });
+
+    it('manual → track с маршрутом: clearGeneratedRoute=false', () => {
+        const plan = getModeTransitionPlan({
+            previousMode: 'manual',
+            nextMode: 'track',
+            trackingActive: false,
+            hasGeneratedRoute: true,
+            hasUserLocation: false,
+            manualPointCount: 3
+        });
+        assert.equal(plan.valid, true);
+        assert.equal(plan.clearGeneratedRoute, false);
+        assert.equal(plan.clearManualMode, true);
+    });
+
+    it('manual → auto с маршрутом: clearGeneratedRoute=true', () => {
+        const plan = getModeTransitionPlan({
+            previousMode: 'manual',
+            nextMode: 'auto',
+            trackingActive: false,
+            hasGeneratedRoute: true,
+            hasUserLocation: false,
+            manualPointCount: 3
+        });
+        assert.equal(plan.valid, true);
+        assert.equal(plan.clearGeneratedRoute, true);
+        assert.equal(plan.clearManualMode, true);
+    });
+
+    it('track → auto при активном tracking без маршрута: no share', () => {
+        const plan = getModeTransitionPlan({
+            previousMode: 'track',
+            nextMode: 'auto',
+            trackingActive: true,
+            hasGeneratedRoute: false,
+            hasUserLocation: false,
+            manualPointCount: 0
+        });
+        assert.equal(plan.valid, true);
+        assert.equal(plan.stopTracking, true);
+        assert.equal(plan.offerShareBeforeClear, false);
+        assert.equal(plan.clearGeneratedRoute, false);
+    });
+
+    it('track → auto после остановки с маршрутом: share', () => {
+        const plan = getModeTransitionPlan({
+            previousMode: 'track',
+            nextMode: 'auto',
+            trackingActive: false,
+            hasGeneratedRoute: true,
+            hasUserLocation: false,
+            manualPointCount: 0
+        });
+        assert.equal(plan.valid, true);
+        assert.equal(plan.offerShareBeforeClear, true);
+        assert.equal(plan.clearGeneratedRoute, true);
+    });
 });

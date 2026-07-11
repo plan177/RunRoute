@@ -110,7 +110,7 @@ function initRouteMode() {
         const btn = e.target.closest('.mode-btn');
         const nextMode = btn.dataset.mode;
 
-        const plan = getModeTransitionPlan({
+        let plan = getModeTransitionPlan({
             previousMode: routeMode,
             nextMode: nextMode,
             trackingActive: tracking,
@@ -125,6 +125,15 @@ function initRouteMode() {
 
         if (plan.stopTracking) {
             stopTracking();
+            // stopTracking may synchronously create currentRoute from recorded points
+            plan = getModeTransitionPlan({
+                previousMode: routeMode,
+                nextMode: nextMode,
+                trackingActive: tracking,
+                hasGeneratedRoute: !!currentRoute,
+                hasUserLocation: !!userLocation,
+                manualPointCount: manualPoints.length
+            });
         }
 
         if (plan.offerShareBeforeClear) {
@@ -139,7 +148,7 @@ function initRouteMode() {
         }
 
         if (plan.clearManualMode) {
-            clearManualMode();
+            clearManualMode(plan.clearGeneratedRoute);
         }
 
         if (plan.removeStartMarker) {
@@ -158,7 +167,7 @@ function initRouteMode() {
         routeMode = nextMode;
         updateUIForMode();
     }));
-    document.getElementById('clear-manual-btn').addEventListener('click', clearManualMode);
+    document.getElementById('clear-manual-btn').addEventListener('click', () => clearManualMode(true));
     document.getElementById('undo-manual-btn').addEventListener('click', undoLastPoint);
     document.getElementById('close-route-btn').addEventListener('click', closeManualRoute);
 }
@@ -223,7 +232,7 @@ function updateUIForMode() {
     document.getElementById('share-btn').classList.add('hidden');
 }
 
-function clearManualMode() {
+function clearManualMode(clearGenerated = true) {
     manualPoints = [];
     manualMarkers.forEach(m => map.removeLayer(m));
     manualMarkers = [];
@@ -232,7 +241,9 @@ function clearManualMode() {
     document.getElementById('insert-mode-btn').classList.remove('active');
     document.body.classList.remove('insert-mode');
     if (manualPolyline) { map.removeLayer(manualPolyline); manualPolyline = null; }
-    clearGeneratedRoute();
+    if (clearGenerated) {
+        clearGeneratedRoute();
+    }
     document.getElementById('generate-btn').disabled = true;
     updateManualCount();
 }
