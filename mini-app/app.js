@@ -148,7 +148,7 @@ function initRouteMode() {
         }
 
         if (plan.clearManualMode) {
-            clearManualMode(plan.clearGeneratedRoute);
+            clearManualMode(false);
         }
 
         if (plan.removeStartMarker) {
