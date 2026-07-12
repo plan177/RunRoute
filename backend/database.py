@@ -1,71 +1,49 @@
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+import asyncpg
 from .config import get_settings
 
 logger = logging.getLogger(__name__)
 
-settings = get_settings()
-
-engine = None
-async_session_factory = None
+_pool: asyncpg.Pool | None = None
 
 
-class Base(DeclarativeBase):
-    pass
+async def init_db_pool() -> None:
+    global _pool
+    settings = get_settings()
+    url = settings.DATABASE_URL.get_secret_value()
+    if not url:
+        raise RuntimeError("DATABASE_URL is not configured")
+
+    _pool = await asyncpg.create_pool(
+        url,
+        min_size=1,
+        max_size=5,
+        command_timeout=10,
+    )
+    logger.info("Database pool initialized")
 
 
-async def init_db():
-    global engine, async_session_factory
+async def close_db_pool() -> None:
+    global _pool
+    if _pool:
+        await _pool.close()
+        _pool = None
+        logger.info("Database pool closed")
 
-    if not settings.database_url_computed:
-        logger.warning("DATABASE_URL not configured. Database features disabled.")
-        return
 
+def get_db_pool() -> asyncpg.Pool:
+    if _pool is None:
+        raise RuntimeError("Database pool not initialized")
+    return _pool
+
+
+async def check_database_connection() -> bool:
+    if _pool is None:
+        return False
     try:
-        engine = create_async_engine(
-            settings.database_url_computed,
-            echo=settings.DEBUG,
-            pool_size=5,
-            max_overflow=10,
-            pool_pre_ping=True,
-        )
-
-        async_session_factory = async_sessionmaker(
-            engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-        raise
-
-
-async def close_db():
-    global engine
-    if engine:
-        await engine.dispose()
-        logger.info("Database connection closed")
-
-
-async def get_db() -> AsyncSession:
-    if async_session_factory is None:
-        raise RuntimeError("Database not initialized. Call init_db() first.")
-    async with async_session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
-
-def is_db_configured() -> bool:
-    return bool(settings.database_url_computed)
+        async with _pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        return True
+    except Exception:
+        logger.warning("Database connection check failed")
+        return False

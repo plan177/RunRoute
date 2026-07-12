@@ -1,24 +1,52 @@
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, AsyncMock
+from httpx import AsyncClient, ASGITransport
+from backend.main import app
 
 
-def test_health_response_model():
-    from backend.models import HealthResponse
-    response = HealthResponse(
-        status="healthy",
-        database="connected",
-        timestamp="2024-01-01T00:00:00"
-    )
-    assert response.status == "healthy"
-    assert response.database == "connected"
-    assert response.timestamp == "2024-01-01T00:00:00"
+@pytest.fixture
+def client():
+    transport = ASGITransport(app=app)
+    return AsyncClient(transport=transport, base_url="http://test")
 
 
-def test_user_model_fields():
-    from backend.models import UserModel
-    assert UserModel.__tablename__ == "users"
+@pytest.mark.asyncio
+async def test_live_needs_no_db(client):
+    resp = await client.get("/health/live")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
 
 
-def test_profile_model_fields():
-    from backend.models import ProfileModel
-    assert ProfileModel.__tablename__ == "profiles"
+@pytest.mark.asyncio
+async def test_ready_200_when_db_up(client):
+    with patch("backend.main.check_database_connection", new_callable=AsyncMock, return_value=True):
+        resp = await client.get("/health/ready")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "ready"
+        assert body["database"] == "up"
+
+
+@pytest.mark.asyncio
+async def test_ready_503_when_db_down(client):
+    with patch("backend.main.check_database_connection", new_callable=AsyncMock, return_value=False):
+        resp = await client.get("/health/ready")
+        assert resp.status_code == 503
+        body = resp.json()
+        assert body["status"] == "not_ready"
+        assert body["database"] == "down"
+
+
+@pytest.mark.asyncio
+async def test_exception_text_absent(client):
+    with patch("backend.main.check_database_connection", new_callable=AsyncMock, return_value=False):
+        resp = await client.get("/health/ready")
+        assert resp.status_code == 503
+        assert "secret" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_health_not_rate_limited(client):
+    for _ in range(15):
+        resp = await client.get("/health/live")
+        assert resp.status_code == 200

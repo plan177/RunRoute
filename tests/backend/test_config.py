@@ -1,52 +1,64 @@
 import os
 import pytest
 from unittest.mock import patch
+from backend.config import Settings
 
 
-def test_settings_defaults():
-    from backend.config import get_settings
-    get_settings.cache_clear()
-    with patch.dict(os.environ, {}, clear=True):
-        from backend.config import Settings
-        settings = Settings()
-        assert settings.ENVIRONMENT == "development"
-        assert settings.API_PORT == 8000
-        assert settings.DB_PORT == 5432
-
-
-def test_database_url_computed_from_parts():
-    from backend.config import get_settings
-    get_settings.cache_clear()
+def test_missing_required_names():
     with patch.dict(os.environ, {
-        "DB_HOST": "localhost",
-        "DB_PORT": "5432",
-        "DB_NAME": "testdb",
-        "DB_USER": "user",
-        "DB_PASSWORD": "pass",
-        "DATABASE_URL": ""
+        "DATABASE_URL": "",
+        "SUPABASE_URL": "",
+        "SUPABASE_SECRET_KEY": "",
+        "BOT_TOKEN": "",
+        "SECRET_KEY": "",
     }, clear=False):
-        from backend.config import Settings
-        settings = Settings()
-        assert "postgresql+asyncpg://user:pass@localhost:5432/testdb" == settings.database_url_computed
+        s = Settings()
+        missing = s.validate_required()
+        assert set(missing) == {"DATABASE_URL", "SUPABASE_URL", "SUPABASE_SECRET_KEY", "BOT_TOKEN", "SECRET_KEY"}
 
 
-def test_database_url_direct():
-    from backend.config import get_settings
-    get_settings.cache_clear()
+def test_valid_config():
     with patch.dict(os.environ, {
-        "DATABASE_URL": "postgresql+asyncpg://user:pass@host:5432/db"
+        "DATABASE_URL": "postgresql://user:pass@host/db",
+        "SUPABASE_URL": "https://example.supabase.co",
+        "SUPABASE_SECRET_KEY": "secret",
+        "BOT_TOKEN": "token",
+        "SECRET_KEY": "key",
     }, clear=False):
-        from backend.config import Settings
-        settings = Settings()
-        assert "postgresql+asyncpg://user:pass@host:5432/db" == settings.database_url_computed
+        s = Settings()
+        assert s.validate_required() == []
 
 
-def test_allowed_origins_list():
-    from backend.config import get_settings
-    get_settings.cache_clear()
+def test_safe_summary():
     with patch.dict(os.environ, {
-        "ALLOWED_ORIGINS": "http://a.com, http://b.com"
+        "DATABASE_URL": "postgresql://user:pass@host/db",
+        "SUPABASE_URL": "https://example.supabase.co",
+        "SUPABASE_SECRET_KEY": "secret",
+        "BOT_TOKEN": "token",
+        "SECRET_KEY": "key",
     }, clear=False):
-        from backend.config import Settings
-        settings = Settings()
-        assert ["http://a.com", "http://b.com"] == settings.allowed_origins_list
+        s = Settings()
+        summary = s.safe_summary()
+        assert summary["database_configured"] is True
+        assert summary["supabase_configured"] is True
+        assert summary["bot_configured"] is True
+
+
+def test_secrets_not_in_repr():
+    with patch.dict(os.environ, {
+        "DATABASE_URL": "postgresql://user:supersecret@host/db",
+        "SUPABASE_SECRET_KEY": "supersecret",
+        "BOT_TOKEN": "supersecret",
+        "SECRET_KEY": "supersecret",
+    }, clear=False):
+        s = Settings()
+        r = repr(s)
+        assert "supersecret" not in r
+
+
+def test_postgres_normalization():
+    with patch.dict(os.environ, {
+        "DATABASE_URL": "postgres://user:pass@host/db",
+    }, clear=False):
+        s = Settings()
+        assert s.DATABASE_URL.get_secret_value().startswith("postgresql://")

@@ -1,36 +1,43 @@
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
+from backend import database
 
 
-def test_is_db_configured_false_by_default():
-    from backend.config import get_settings
-    get_settings.cache_clear()
-    with patch.dict(__import__('os').environ, {"DATABASE_URL": ""}, clear=False):
-        from backend.config import Settings
-        settings = Settings()
-        assert settings.database_url_computed == ""
+def test_pool_not_created_on_import():
+    assert database._pool is None
 
 
-def test_is_db_configured_true_with_url():
-    from backend.config import get_settings
-    get_settings.cache_clear()
-    with patch.dict(__import__('os').environ, {
-        "DATABASE_URL": "postgresql+asyncpg://user:pass@host:5432/db"
-    }, clear=False):
-        from backend.config import Settings
-        settings = Settings()
-        assert settings.database_url_computed == "postgresql+asyncpg://user:pass@host:5432/db"
+@pytest.mark.asyncio
+async def test_init_calls_create_pool():
+    mock_pool = AsyncMock()
+    with patch("backend.database.asyncpg.create_pool", new_callable=AsyncMock, return_value=mock_pool) as mock_create, \
+         patch("backend.database.get_settings") as mock_settings:
+        mock_settings.return_value = MagicMock()
+        mock_settings.return_value.DATABASE_URL = MagicMock()
+        mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = "postgresql://u:p@h/d"
+
+        await database.init_db_pool()
+        assert database._pool is mock_pool
+        mock_create.assert_called_once()
 
 
-def test_is_db_configured_true_with_parts():
-    from backend.config import get_settings
-    get_settings.cache_clear()
-    with patch.dict(__import__('os').environ, {
-        "DB_HOST": "localhost",
-        "DB_USER": "user",
-        "DB_PASSWORD": "pass",
-        "DATABASE_URL": ""
-    }, clear=False):
-        from backend.config import Settings
-        settings = Settings()
-        assert "localhost" in settings.database_url_computed
+@pytest.mark.asyncio
+async def test_check_returns_true_on_success():
+    mock_conn = AsyncMock()
+    mock_conn.fetchval = AsyncMock(return_value=1)
+    mock_pool = AsyncMock()
+    mock_pool.acquire = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_conn), __aexit__=AsyncMock(return_value=False)))
+    database._pool = mock_pool
+    result = await database.check_database_connection()
+    assert result is True
+    database._pool = None
+
+
+@pytest.mark.asyncio
+async def test_check_returns_false_on_error():
+    mock_pool = AsyncMock()
+    mock_pool.acquire = MagicMock(side_effect=Exception("connection failed"))
+    database._pool = mock_pool
+    result = await database.check_database_connection()
+    assert result is False
+    database._pool = None
