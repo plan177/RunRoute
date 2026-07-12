@@ -2,21 +2,48 @@ import os
 import hashlib
 import hmac
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, HTTPException, Request, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 from route_generator import RouteGenerator
-from models import RouteRequest, RouteResponse, FeedbackRequest
+from models import RouteRequest, RouteResponse, FeedbackRequest, HealthResponse
+from config import get_settings
+from database import init_db, close_db, get_db, is_db_configured
 import uvicorn
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="RunRouteBot API", version="1.0.0")
+settings = get_settings()
 
-ALLOWED_ORIGINS = [
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting RunRouteBot API...")
+    if is_db_configured():
+        try:
+            await init_db()
+            logger.info("Database connected successfully")
+        except Exception as e:
+            logger.error(f"Database connection failed: {e}")
+    else:
+        logger.warning("Database not configured. Running without database.")
+    yield
+    # Shutdown
+    await close_db()
+    logger.info("API shutdown complete")
+
+app = FastAPI(
+    title="RunRouteBot API",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+ALLOWED_ORIGINS = settings.allowed_origins_list or [
     "http://localhost:8080",
     "http://localhost:3000",
     "*"
@@ -26,7 +53,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -61,13 +88,13 @@ def verify_telegram_init_data(init_data: str, bot_token: str) -> bool:
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
     client_ip = request.client.host
-    
+
     if not check_rate_limit(client_ip):
         return JSONResponse(
             status_code=429,
             content={"error": "Too many requests. Please try again later."}
         )
-    
+
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -78,9 +105,26 @@ async def security_middleware(request: Request, call_next):
 async def root():
     return {"message": "RunRouteBot API is running", "version": "1.0.0"}
 
-@app.get("/api/health")
-async def health():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+@app.get("/api/health", response_model=HealthResponse)
+async def health(db: AsyncSession = Depends(get_db)) -> HealthResponse:
+    db_status = "connected" if is_db_configured() else "not_configured"
+    return HealthResponse(
+        status="healthy",
+        database=db_status,
+        timestamp=datetime.now().isoformat()
+    )
+
+@app.get("/api/liveness")
+async def liveness():
+    return {"status": "alive"}
+
+@app.get("/api/readiness")
+async def readiness():
+    db_ready = is_db_configured()
+    return {
+        "status": "ready" if db_ready else "degraded",
+        "database": "connected" if db_ready else "not_configured"
+    }
 
 @app.get("/api/search")
 async def search_address(q: str = Query(..., description="Address or city name")):
