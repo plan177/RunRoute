@@ -32,6 +32,24 @@ function initTelegram() {
     }
 }
 
+function isTelegramApp() {
+    return !!(window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData);
+}
+
+function getTelegramInitData() {
+    if (!isTelegramApp()) return null;
+    return window.Telegram.WebApp.initData || null;
+}
+
+function getApiHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    const initData = getTelegramInitData();
+    if (initData) {
+        headers['X-Telegram-Init-Data'] = initData;
+    }
+    return headers;
+}
+
 function initMap() {
     map = L.map('map', {
         tap: true,
@@ -1548,7 +1566,7 @@ function initFeedback() {
             const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
             const resp = await fetch('/api/feedback', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getApiHeaders(),
                 body: JSON.stringify({
                     message: text,
                     user_id: user?.id || null,
@@ -1573,6 +1591,27 @@ function initFeedback() {
     });
 }
 
+// === User profile ===
+
+let currentUser = null;
+
+async function loadCurrentUser() {
+    if (!isTelegramApp()) {
+        return;
+    }
+    try {
+        const resp = await fetch('/api/me', { headers: getApiHeaders() });
+        if (resp.ok) {
+            const data = await resp.json();
+            currentUser = data.user;
+        } else if (resp.status === 401) {
+            console.warn('Telegram auth failed — running outside Telegram or invalid initData');
+        }
+    } catch (e) {
+        console.warn('Could not load user:', e.message);
+    }
+}
+
 // === Init all ===
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1587,6 +1626,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initFeedback();
     initInsertMode();
     initGPS();
+    loadCurrentUser();
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);
     updateUIForMode();
