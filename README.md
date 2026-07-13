@@ -183,7 +183,19 @@ API нужно создать **отдельным Railway service** из тог
 |----------|----------|
 | Start command | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` |
 | Healthcheck path | `/health/ready` |
-| Variables | Собственный набор Railway Variables (DATABASE_URL, BOT_TOKEN, SECRET_KEY) |
+| Variables | См. таблицу ниже |
+
+| Variable | Required | Описание |
+|----------|----------|----------|
+| DATABASE_URL | ✅ | PostgreSQL URL (Supabase) |
+| SUPABASE_URL | ✅ | Supabase project URL |
+| SUPABASE_SECRET_KEY | ✅ | Supabase secret key |
+| BOT_TOKEN | ✅ | Telegram bot token |
+| SECRET_KEY | ✅ | Application secret key |
+| SUPABASE_PUBLISHABLE_KEY | ❌ | До подключения клиентской авторизации |
+| WEB_APP_URL | ❌ | URL Mini App |
+| FEEDBACK_CHAT_ID | ❌ | Telegram chat ID для обратной связи |
+| ALLOWED_ORIGINS | ❌ | CORS origins |
 
 Миграцию применяем отдельно один раз после review.
 

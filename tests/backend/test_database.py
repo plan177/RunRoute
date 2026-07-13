@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from backend import database
@@ -47,13 +48,20 @@ async def test_check_returns_false_on_error():
 
 
 @pytest.mark.asyncio
-async def test_check_returns_false_on_timeout():
+async def test_check_returns_false_on_timeout(caplog):
+    async def slow_acquire():
+        await asyncio.sleep(100)
+        return AsyncMock()
+
     mock_pool = AsyncMock()
-    mock_pool.acquire = MagicMock(side_effect=TimeoutError("timeout"))
-    database._pool = mock_pool
-    result = await database.check_database_connection()
-    assert result is False
-    database._pool = None
+    mock_pool.acquire = slow_acquire
+
+    with patch("backend.database.DB_HEALTH_TIMEOUT_SECONDS", 0.01):
+        database._pool = mock_pool
+        result = await database.check_database_connection()
+        assert result is False
+        assert "supersecret" not in caplog.text
+        database._pool = None
 
 
 @pytest.mark.asyncio

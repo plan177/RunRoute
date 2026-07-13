@@ -7,6 +7,8 @@ logger = logging.getLogger(__name__)
 
 _pool: asyncpg.Pool | None = None
 
+DB_HEALTH_TIMEOUT_SECONDS = 5
+
 
 async def init_db_pool() -> None:
     global _pool
@@ -42,7 +44,7 @@ async def check_database_connection() -> bool:
     if _pool is None:
         return False
     try:
-        async with asyncio.timeout(5):
+        async with asyncio.timeout(DB_HEALTH_TIMEOUT_SECONDS):
             async with _pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
         return True
