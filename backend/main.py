@@ -15,6 +15,7 @@ import uvicorn
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 RATE_LIMIT_STORE: dict[str, list[float]] = {}
 EXEMPT_PATHS = {"/health/live", "/health/ready", "/api/health"}
