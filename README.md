@@ -158,8 +158,8 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
 | Endpoint | Описание |
 |----------|----------|
-| `GET /health/live` | Проверка: процесс API работает |
-| `GET /health/ready` | Проверка: API подключён к PostgreSQL (200/503) |
+| [`GET /health/live`](https://authentic-growth-runroute-pr-51.up.railway.app/health/live) | Проверка: процесс API работает |
+| [`GET /health/ready`](https://authentic-growth-runroute-pr-51.up.railway.app/health/ready) | Проверка: API подключён к PostgreSQL (200/503) |
 | `GET /api/health` | Совместимый liveness alias |
 | `GET /api/me` | Текущий пользователь (требует Telegram initData) |
 
@@ -167,17 +167,13 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
 Mini App передаёт `Telegram.WebApp.initData` в заголовке `X-Telegram-Init-Data` при каждом запросе к защищённым endpoints.
 
-**Настройка API URL:**
+**Production API URL:**
 
-Mini App определяет API base URL через `mini-app/config.js`:
-
-```js
-window.RUNROUTE_CONFIG = {
-    API_BASE_URL: 'https://your-api.up.railway.app'
-};
+```
+https://authentic-growth-runroute-pr-51.up.railway.app
 ```
 
-Для локальной разработки оставьте `API_BASE_URL` пустым — будут использоваться относительные пути.
+Для локальной разработки установите `API_BASE_URL` в пустую строку в `mini-app/config.js` — будут использоваться относительные пути.
 
 **Настройка Railway:**
 
