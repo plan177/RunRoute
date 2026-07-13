@@ -1362,3 +1362,136 @@ body {
     background: rgba(255, 59, 92, 0.1);
     color: var(--danger);
 }
+
+/* Calendar */
+.calendar-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+}
+
+.cal-month-label {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.cal-days {
+    display: flex;
+    gap: 4px;
+    padding: 0 16px 12px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.cal-day {
+    min-width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 13px;
+    background: var(--glass);
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.cal-day.has-run {
+    background: var(--primary);
+    color: var(--bg);
+    font-weight: 600;
+}
+
+.cal-day.selected {
+    outline: 2px solid var(--accent);
+}
+
+.cal-events {
+    padding: 0 16px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.cal-event {
+    padding: 10px 12px;
+    background: var(--glass);
+    border-radius: var(--radius-xs);
+    margin-bottom: 8px;
+    border-left: 3px solid var(--primary);
+}
+
+.cal-event.cancelled {
+    opacity: 0.5;
+    border-left-color: var(--text-secondary);
+}
+
+.cal-event-title {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.cal-event-time {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.cal-event-route {
+    font-size: 12px;
+    color: var(--accent);
+}
+
+.cal-event-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.cal-event-actions button {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--glass-border);
+    background: none;
+    color: var(--text);
+    cursor: pointer;
+}
+
+.cal-event-actions button:hover {
+    background: var(--glass);
+}
+
+.cal-event-actions .cancel-btn {
+    color: var(--danger);
+    border-color: var(--danger);
+}
+
+.cal-empty {
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 13px;
+    padding: 20px;
+}
+
+.profile-field select {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xs);
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+}
+
+.profile-field input[type="checkbox"] {
+    width: auto;
+    margin-right: 6px;
+}
+
+.profile-field small {
+    display: block;
+    margin-top: 4px;
+}

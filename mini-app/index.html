@@ -30,7 +30,7 @@
                 </button>
                 <div id="user-menu" class="user-menu hidden">
                     <button id="menu-profile" class="menu-item" aria-label="Профиль">Профиль</button>
-                    <button id="menu-calendar" class="menu-item" disabled aria-label="Календарь">Календарь <span class="menu-badge">Скоро</span></button>
+                    <button id="menu-calendar" class="menu-item" aria-label="Календарь">Календарь</button>
                     <button id="menu-feedback" class="menu-item" aria-label="Обратная связь">Обратная связь</button>
                 </div>
             </div>
@@ -227,6 +227,14 @@
                         </svg>
                         Поделиться
                     </button>
+                    <button id="save-route-btn" class="btn-share hidden" onclick="openSaveRouteModal()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                            <polyline points="17 21 17 13 7 13 7 21"/>
+                            <polyline points="7 3 7 8 15 8"/>
+                        </svg>
+                        Сохранить
+                    </button>
                 </div>
                 <div id="share-toast" class="toast hidden"></div>
             </div>
@@ -391,6 +399,93 @@
                     <button id="profile-save" class="modal-btn primary">Сохранить</button>
                     <button id="profile-cancel" class="modal-btn secondary">Закрыть</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="save-route-modal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <p class="modal-text">Сохранить маршрут</p>
+            <div class="profile-field">
+                <label for="save-route-name">Название</label>
+                <input type="text" id="save-route-name" maxlength="100" placeholder="Маршрут — сегодня" />
+            </div>
+            <div id="save-route-status" class="profile-status hidden"></div>
+            <div class="modal-actions">
+                <button id="save-route-confirm" class="modal-btn primary">Сохранить</button>
+                <button id="save-route-cancel" class="modal-btn secondary">Отмена</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="calendar-modal" class="modal-overlay hidden">
+        <div class="modal-card modal-profile">
+            <div id="calendar-loading" class="profile-loading">
+                <div class="skeleton skeleton-line"></div>
+                <div class="skeleton skeleton-line short"></div>
+            </div>
+            <div id="calendar-content" class="hidden">
+                <div class="calendar-nav">
+                    <button id="cal-prev" class="btn-icon" aria-label="Предыдущий месяц">&lsaquo;</button>
+                    <span id="cal-month-label" class="cal-month-label"></span>
+                    <button id="cal-next" class="btn-icon" aria-label="Следующий месяц">&rsaquo;</button>
+                </div>
+                <div id="cal-days" class="cal-days"></div>
+                <div id="cal-events" class="cal-events">
+                    <p class="cal-empty">Нет пробежек</p>
+                </div>
+                <button id="cal-add-run" class="btn-primary" style="width:100%;margin-top:12px;">Запланировать пробежку</button>
+            </div>
+            <div id="calendar-status" class="profile-status hidden"></div>
+            <div class="modal-actions">
+                <button id="calendar-close" class="modal-btn secondary">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="run-form-modal" class="modal-overlay hidden">
+        <div class="modal-card modal-profile">
+            <p class="modal-text">Новая пробежка</p>
+            <div class="profile-field">
+                <label for="run-title">Название</label>
+                <input type="text" id="run-title" maxlength="100" placeholder="Утренняя пробежка" />
+            </div>
+            <div class="profile-field">
+                <label for="run-date">Дата и время</label>
+                <input type="datetime-local" id="run-date" />
+            </div>
+            <div class="profile-field">
+                <label for="run-route-select">Маршрут (опционально)</label>
+                <select id="run-route-select"><option value="">Без маршрута</option></select>
+            </div>
+            <div class="profile-field">
+                <label for="run-duration">Длительность (мин)</label>
+                <input type="number" id="run-duration" min="1" max="1440" placeholder="опционально" />
+            </div>
+            <div class="profile-field">
+                <label for="run-notes">Заметка</label>
+                <textarea id="run-notes" maxlength="1000" rows="2" placeholder="Заметка"></textarea>
+            </div>
+            <div class="profile-field">
+                <label for="run-reminder">Напоминание</label>
+                <select id="run-reminder">
+                    <option value="">Без напоминания</option>
+                    <option value="0">В момент начала</option>
+                    <option value="15">За 15 минут</option>
+                    <option value="30">За 30 минут</option>
+                    <option value="60">За 1 час</option>
+                    <option value="180">За 3 часа</option>
+                    <option value="1440">За 1 день</option>
+                </select>
+            </div>
+            <div class="profile-field">
+                <label><input type="checkbox" id="run-notifications" checked /> Уведомления</label>
+                <small style="color:var(--text-secondary)">Настройка сохранена; Telegram-уведомления будут подключены следующим этапом</small>
+            </div>
+            <div id="run-form-status" class="profile-status hidden"></div>
+            <div class="modal-actions">
+                <button id="run-form-save" class="modal-btn primary">Создать</button>
+                <button id="run-form-cancel" class="modal-btn secondary">Отмена</button>
             </div>
         </div>
     </div>

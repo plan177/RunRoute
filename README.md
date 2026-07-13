@@ -164,6 +164,14 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 | `GET /api/me` | Текущий пользователь (требует Telegram initData) |
 | `GET /api/profile` | Получение профиля текущего пользователя |
 | `PUT /api/profile` | Обновление профиля текущего пользователя |
+| `POST /api/routes` | Сохранение маршрута |
+| `GET /api/routes` | Список сохранённых маршрутов |
+| `GET /api/routes/{id}` | Получение маршрута |
+| `DELETE /api/routes/{id}` | Удаление маршрута |
+| `POST /api/calendar/runs` | Создание запланированной пробежки |
+| `GET /api/calendar/runs?from=&to=` | Пробежки за период (timezone-aware) |
+| `PUT /api/calendar/runs/{id}` | Редактирование пробежки |
+| `POST /api/calendar/runs/{id}/cancel` | Отмена пробежки (идемпотентна) |
 
 ### Telegram Authentication
 
@@ -233,6 +241,16 @@ ALLOWED_ORIGINS=https://run-route-ten.vercel.app
 
 Без Telegram initData запрос `/api/me` и `/api/profile` вернут 401. Профиль покажет сообщение «Профиль доступен только внутри Telegram».
 
+### Сохранённые маршруты
+
+POST `/api/routes` сохраняет построенный или записанный маршрут. Поддерживает auto/manual/track режимы. Максимум 10 000 точек.
+
+### Календарь
+
+GET `/api/calendar/runs?from=...&to=...` возвращает запланированные пробежки за период. from/to обязательны, timezone-aware, максимум 366 дней.
+
+`reminder_minutes`: 0, 15, 30, 60, 180, 1440. Уведомления пока только сохраняются — Telegram-уведомления будут подключены следующим этапом.
+
 ### Миграции
 
 ```bash
@@ -241,7 +259,7 @@ python -m backend.migrate
 
 - Миграции выполняются автоматически перед каждым API deployment (pre-deploy command в `railway.api.json`)
 - Повторный запуск пропускает уже применённые файлы
-- Текущие миграции: `001_users_profiles.sql`, `002_secure_schema_migrations.sql`
+- Текущие миграции: `001_users_profiles.sql`, `002_secure_schema_migrations.sql`, `003_saved_routes_and_planned_runs.sql`
 - Секреты нельзя передавать в командной строке или коммитить
 
 ### Railway
