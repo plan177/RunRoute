@@ -4,6 +4,19 @@ from typing import List, Optional
 
 ALLOWED_SOCIAL_KEYS = {"telegram", "instagram", "strava", "vk", "website"}
 ALLOWED_URL_SCHEMES = {"http", "https"}
+MAX_URL_LENGTH = 2048
+
+
+def _validate_url(v: str) -> str:
+    from urllib.parse import urlparse
+    parsed = urlparse(v)
+    if parsed.scheme not in ALLOWED_URL_SCHEMES:
+        raise ValueError("URL must use http or https scheme")
+    if not parsed.hostname:
+        raise ValueError("URL must have a hostname")
+    if len(v) > MAX_URL_LENGTH:
+        raise ValueError(f"URL must be {MAX_URL_LENGTH} characters or fewer")
+    return v
 
 
 class RouteRequest(BaseModel):
@@ -49,10 +62,7 @@ class SocialLinks(BaseModel):
     @classmethod
     def validate_urls(cls, v):
         if v is not None and isinstance(v, str):
-            from urllib.parse import urlparse
-            parsed = urlparse(v)
-            if parsed.scheme not in ALLOWED_URL_SCHEMES:
-                raise ValueError(f"URL must use http or https scheme")
+            _validate_url(v)
         return v
 
     model_config = {"extra": "forbid"}
@@ -107,10 +117,7 @@ class ProfileUpdateRequest(BaseModel):
         if isinstance(v, str) and v.strip() == "":
             return None
         if v is not None and isinstance(v, str):
-            from urllib.parse import urlparse
-            parsed = urlparse(v)
-            if parsed.scheme not in ALLOWED_URL_SCHEMES:
-                raise ValueError(f"URL must use http or https scheme")
+            _validate_url(v)
         return v
 
     model_config = {"extra": "forbid"}

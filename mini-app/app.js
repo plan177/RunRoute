@@ -1535,17 +1535,18 @@ function smoothPoint(point) {
 
 // === Feedback ===
 
-function initFeedback() {
+function openFeedbackModal() {
     const modal = document.getElementById('feedback-modal');
     const textarea = document.getElementById('feedback-text');
+    textarea.value = '';
+    modal.classList.remove('hidden');
+    textarea.focus();
+}
+
+function initFeedback() {
+    const modal = document.getElementById('feedback-modal');
     const sendBtn = document.getElementById('feedback-send');
     const cancelBtn = document.getElementById('feedback-cancel');
-
-    document.getElementById('feedback-btn').addEventListener('click', () => {
-        textarea.value = '';
-        modal.classList.remove('hidden');
-        textarea.focus();
-    });
 
     cancelBtn.addEventListener('click', () => {
         modal.classList.add('hidden');
@@ -1556,6 +1557,7 @@ function initFeedback() {
     });
 
     sendBtn.addEventListener('click', async () => {
+        const textarea = document.getElementById('feedback-text');
         const text = textarea.value.trim();
         if (!text) return;
 
@@ -1651,8 +1653,7 @@ function initMenu() {
 
     feedbackBtn.addEventListener('click', () => {
         menu.classList.add('hidden');
-        document.getElementById('feedback-modal').classList.remove('hidden');
-        document.getElementById('feedback-text').focus();
+        openFeedbackModal();
     });
 }
 

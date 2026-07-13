@@ -378,3 +378,93 @@ async def test_health_endpoints_still_public():
         for path in ["/health/live", "/health/ready", "/api/health"]:
             resp = await client.get(path)
             assert resp.status_code in (200, 503), f"{path} should be public"
+
+
+# --- URL validation tests ---
+
+
+@pytest.mark.asyncio
+async def test_put_profile_valid_https_url():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.upsert_profile", new_callable=lambda: AsyncMock(return_value=_mock_profile())):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/profile",
+                json={"avatar_url": "https://example.com/photo.jpg"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_put_profile_rejects_missing_hostname():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/profile",
+                json={"avatar_url": "https:invalid"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_put_profile_rejects_missing_host():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/profile",
+                json={"avatar_url": "http:/missing-host"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_put_profile_rejects_long_url():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/profile",
+                json={"avatar_url": "https://example.com/" + "a" * 2050},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_put_profile_rejects_data_url():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/profile",
+                json={"avatar_url": "data:text/html,<script>"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 422
