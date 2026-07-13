@@ -233,15 +233,27 @@ python -m backend.migrate
 
 ### Railway
 
-Существующий RunRoute service продолжает запускать `python bot.py`.
+Проект использует два отдельных Railway service из одного GitHub repo:
 
-API нужно создать **отдельным Railway service** из того же GitHub repo:
+**Bot service:**
 
 | Параметр | Значение |
 |----------|----------|
+| Config file | `/railway.json` |
+| Start command | `python bot.py` |
+
+**API service:**
+
+| Параметр | Значение |
+|----------|----------|
+| Config file | `/railway.api.json` |
+| Pre-deploy | `python -m backend.migrate` |
 | Start command | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` |
 | Healthcheck path | `/health/ready` |
-| Variables | См. таблицу ниже |
+| Healthcheck timeout | 30s |
+
+| Variable | Required | Описание |
+|----------|----------|----------|
 
 | Variable | Required | Описание |
 |----------|----------|----------|
