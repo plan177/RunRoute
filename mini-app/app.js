@@ -154,9 +154,18 @@ function initRouteMode() {
             });
         }
 
-        if (plan.offerShareBeforeClear) {
-            const confirmed = await showConfirmModal('Маршрут будет удалён. Поделиться перед удалением?');
-            if (confirmed) {
+        if (plan.offerShareBeforeClear && nextMode === 'track') {
+            const result = await showConfirmModal(
+                'Поделиться текущим маршрутом перед переходом в режим следования?',
+                { yesText: 'Поделиться', middle: 'Продолжить без отправки', noText: 'Отмена' }
+            );
+            if (result === 'no') return;
+            if (result === 'yes') {
+                await shareRoute();
+            }
+        } else if (plan.offerShareBeforeClear) {
+            const result = await showConfirmModal('Маршрут будет удалён. Поделиться перед удалением?');
+            if (result === 'yes') {
                 await shareRoute();
             }
         }
@@ -194,7 +203,7 @@ function useStartForManual() {
     if (!userLocation) return;
 
     showConfirmModal('Начать маршрут от текущей точки?').then(confirmed => {
-        if (confirmed) {
+        if (confirmed === 'yes') {
             clearGeneratedRoute();
             if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
 
@@ -213,25 +222,47 @@ function useStartForManual() {
     });
 }
 
-function showConfirmModal(text) {
+function showConfirmModal(text, options) {
     return new Promise(resolve => {
         const modal = document.getElementById('confirm-modal');
         const textEl = document.getElementById('confirm-text');
         const yesBtn = document.getElementById('confirm-yes');
+        const middleBtn = document.getElementById('confirm-middle');
         const noBtn = document.getElementById('confirm-no');
 
         textEl.textContent = text;
+
+        if (options && options.middle) {
+            middleBtn.textContent = options.middle;
+            middleBtn.classList.remove('hidden');
+            if (options.middleClass) middleBtn.className = 'modal-btn ' + options.middleClass;
+        } else {
+            middleBtn.classList.add('hidden');
+        }
+
+        if (options && options.yesText) yesBtn.textContent = options.yesText;
+        else yesBtn.textContent = 'Да';
+        if (options && options.noText) noBtn.textContent = options.noText;
+        else noBtn.textContent = 'Нет';
+
         modal.classList.remove('hidden');
 
         function cleanup(result) {
             modal.classList.add('hidden');
             yesBtn.removeEventListener('click', onYes);
+            middleBtn.removeEventListener('click', onMiddle);
             noBtn.removeEventListener('click', onNo);
+            yesBtn.textContent = 'Да';
+            noBtn.textContent = 'Нет';
+            middleBtn.classList.add('hidden');
+            middleBtn.className = 'modal-btn secondary';
             resolve(result);
         }
-        function onYes() { cleanup(true); }
-        function onNo() { cleanup(false); }
+        function onYes() { cleanup('yes'); }
+        function onMiddle() { cleanup('middle'); }
+        function onNo() { cleanup('no'); }
         yesBtn.addEventListener('click', onYes);
+        middleBtn.addEventListener('click', onMiddle);
         noBtn.addEventListener('click', onNo);
     });
 }
@@ -248,6 +279,7 @@ function updateUIForMode() {
     document.getElementById('generate-btn').classList.toggle('hidden', isTrack);
     document.getElementById('regenerate-btn').classList.add('hidden');
     document.getElementById('share-btn').classList.add('hidden');
+    document.getElementById('save-route-btn').classList.add('hidden');
 }
 
 function clearManualMode(clearGenerated = true) {
@@ -272,6 +304,7 @@ function clearGeneratedRoute() {
     document.getElementById('route-info').classList.add('hidden');
     document.getElementById('regenerate-btn').classList.add('hidden');
     document.getElementById('share-btn').classList.add('hidden');
+    document.getElementById('save-route-btn').classList.add('hidden');
 }
 
 function updateManualCount() {

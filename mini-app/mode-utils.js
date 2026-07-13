@@ -52,8 +52,8 @@
         }
 
         const shouldStopTracking = trackingActive && previousMode === 'track' && nextMode !== 'track';
-        const shouldOfferShare = hasGeneratedRoute && nextMode !== 'track';
-        const shouldClearGeneratedRoute = shouldOfferShare;
+        const shouldOfferShare = hasGeneratedRoute && previousMode !== 'track';
+        const shouldClearGeneratedRoute = hasGeneratedRoute;
         const shouldClearManualMode = previousMode === 'manual' && nextMode !== 'manual';
         const shouldRemoveStartMarker = nextMode === 'manual';
         const shouldSeedManualStartPoint = previousMode === 'auto' && nextMode === 'manual' && hasUserLocation && manualPointCount === 0;
