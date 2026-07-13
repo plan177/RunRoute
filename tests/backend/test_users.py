@@ -70,6 +70,36 @@ async def test_upsert_user_no_fstring_in_sql():
 
 
 @pytest.mark.asyncio
+async def test_upsert_sets_is_active_true():
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow = AsyncMock(return_value={
+        "id": "00000000-0000-0000-0000-000000000003",
+        "telegram_user_id": 789,
+        "telegram_username": "reactivated",
+        "first_name": "R",
+        "last_name": "A",
+        "language_code": None,
+        "telegram_photo_url": None,
+    })
+    mock_pool = AsyncMock()
+    mock_pool.acquire = MagicMock(return_value=MagicMock(__aenter__=AsyncMock(return_value=mock_conn), __aexit__=AsyncMock(return_value=False)))
+
+    with patch("backend.users.get_db_pool", return_value=mock_pool):
+        await upsert_user(
+            telegram_user_id=789,
+            username="reactivated",
+            first_name="R",
+            last_name="A",
+            language_code=None,
+            photo_url=None,
+        )
+
+    sql = mock_conn.fetchrow.call_args[0][0]
+    assert "is_active = true" in sql
+    assert "ON CONFLICT" in sql
+
+
+@pytest.mark.asyncio
 async def test_get_profile_returns_dict():
     mock_conn = AsyncMock()
     mock_conn.fetchrow = AsyncMock(return_value={

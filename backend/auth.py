@@ -3,7 +3,7 @@ import hmac
 import json
 import logging
 from time import time
-from urllib.parse import unquote, parse_qsl
+from urllib.parse import parse_qsl
 
 from fastapi import HTTPException, Request
 
@@ -17,13 +17,13 @@ class TelegramAuthError(Exception):
 
 
 def parse_init_data(init_data: str) -> dict[str, str]:
-    parsed = {}
-    for pair in init_data.split("&"):
-        if "=" not in pair:
-            continue
-        key, value = pair.split("=", 1)
-        parsed[unquote(key)] = unquote(value)
-    return parsed
+    pairs = parse_qsl(init_data, keep_blank_values=True)
+    result: dict[str, str] = {}
+    for key, value in pairs:
+        if key in result:
+            raise TelegramAuthError(f"Duplicate key in init data: {key}")
+        result[key] = value
+    return result
 
 
 def verify_telegram_init_data(init_data: str, bot_token: str, max_age_seconds: int = 86400) -> dict:
@@ -32,7 +32,12 @@ def verify_telegram_init_data(init_data: str, bot_token: str, max_age_seconds: i
     if not bot_token:
         raise TelegramAuthError("Bot token not configured")
 
-    parsed = parse_init_data(init_data)
+    try:
+        parsed = parse_init_data(init_data)
+    except TelegramAuthError:
+        raise
+    except Exception:
+        raise TelegramAuthError("Failed to parse init data")
 
     hash_value = parsed.pop("hash", None)
     if not hash_value:
@@ -70,11 +75,15 @@ def verify_telegram_init_data(init_data: str, bot_token: str, max_age_seconds: i
     except (json.JSONDecodeError, TypeError):
         raise TelegramAuthError("Invalid user data")
 
-    if "id" not in user:
-        raise TelegramAuthError("Missing user id")
+    if not isinstance(user, dict):
+        raise TelegramAuthError("Invalid user data")
+
+    user_id = user.get("id")
+    if not isinstance(user_id, int) or isinstance(user_id, bool) or user_id <= 0:
+        raise TelegramAuthError("Invalid user id")
 
     return {
-        "id": user["id"],
+        "id": user_id,
         "username": user.get("username"),
         "first_name": user.get("first_name", ""),
         "last_name": user.get("last_name", ""),

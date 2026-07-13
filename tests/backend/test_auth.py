@@ -5,6 +5,7 @@ import time
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from httpx import AsyncClient, ASGITransport
+from urllib.parse import urlencode
 from backend.auth import verify_telegram_init_data, TelegramAuthError
 
 
@@ -26,17 +27,17 @@ def _make_init_data(user_id=123456, username="testuser", auth_date=None, extra_f
     if extra_fields:
         user_data.update(extra_fields)
 
-    data_dict = {
+    raw = {
         "user": json.dumps(user_data),
         "auth_date": str(auth_date),
     }
 
-    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_dict.items()))
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
     secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
     hash_value = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
-    data_dict["hash"] = hash_value
-    return "&".join(f"{k}={v}" for k, v in data_dict.items())
+    raw["hash"] = hash_value
+    return urlencode(raw)
 
 
 def _mock_auth_settings():
@@ -78,29 +79,28 @@ def test_missing_hash():
 
 def test_corrupted_user_json():
     auth_date = int(time.time())
-    data_dict = {
+    raw = {
         "user": "not-valid-json{{{",
         "auth_date": str(auth_date),
     }
-    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_dict.items()))
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
     secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
     hash_value = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-    data_dict["hash"] = hash_value
-    init_data = "&".join(f"{k}={v}" for k, v in data_dict.items())
+    raw["hash"] = hash_value
+    init_data = urlencode(raw)
 
     with pytest.raises(TelegramAuthError, match="Invalid user data"):
         verify_telegram_init_data(init_data, BOT_TOKEN)
 
 
 def test_missing_auth_date():
-    auth_date = int(time.time())
     user_data = {"id": 123, "username": "u"}
-    data_dict = {"user": json.dumps(user_data)}
-    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_dict.items()))
+    raw = {"user": json.dumps(user_data)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
     secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
     hash_value = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-    data_dict["hash"] = hash_value
-    init_data = "&".join(f"{k}={v}" for k, v in data_dict.items())
+    raw["hash"] = hash_value
+    init_data = urlencode(raw)
 
     with pytest.raises(TelegramAuthError, match="Missing auth_date"):
         verify_telegram_init_data(init_data, BOT_TOKEN)
@@ -138,6 +138,177 @@ def test_init_data_not_in_error_logs(caplog):
     except TelegramAuthError:
         pass
     assert "badData" not in caplog.text
+
+
+# --- New review tests ---
+
+
+def test_spaces_and_plus_in_name():
+    init_data = _make_init_data(username="user name+test")
+    result = verify_telegram_init_data(init_data, BOT_TOKEN)
+    assert result["username"] == "user name+test"
+
+
+def test_percent_encoded_user_json():
+    user_data = {"id": 555, "username": "тест", "first_name": "Иван"}
+    raw = {
+        "user": json.dumps(user_data),
+        "auth_date": str(int(time.time())),
+    }
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    hash_value = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    raw["hash"] = hash_value
+    init_data = urlencode(raw)
+
+    result = verify_telegram_init_data(init_data, BOT_TOKEN)
+    assert result["id"] == 555
+    assert result["username"] == "тест"
+
+
+def test_duplicate_hash_rejected():
+    auth_date = int(time.time())
+    user_data = {"id": 1, "username": "u"}
+    data_dict = {"user": json.dumps(user_data), "auth_date": str(auth_date)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_dict.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    hash_value = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    data_dict["hash"] = hash_value
+    init_data = urlencode(data_dict) + "&hash=duplicate"
+
+    with pytest.raises(TelegramAuthError, match="Duplicate key"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_duplicate_auth_date_rejected():
+    auth_date = int(time.time())
+    user_data = {"id": 1, "username": "u"}
+    raw = {"user": json.dumps(user_data), "auth_date": str(auth_date)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    raw["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    init_data = urlencode(raw) + "&auth_date=999"
+
+    with pytest.raises(TelegramAuthError, match="Duplicate key"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_duplicate_user_rejected():
+    auth_date = int(time.time())
+    user_data = {"id": 1, "username": "u"}
+    raw = {"user": json.dumps(user_data), "auth_date": str(auth_date)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    raw["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    init_data = urlencode(raw) + "&user=extra"
+
+    with pytest.raises(TelegramAuthError, match="Duplicate key"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_user_json_is_list():
+    auth_date = int(time.time())
+    raw = {"user": "[1,2,3]", "auth_date": str(auth_date)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    raw["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    init_data = urlencode(raw)
+
+    with pytest.raises(TelegramAuthError, match="Invalid user data"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_user_json_is_string():
+    auth_date = int(time.time())
+    raw = {"user": "\"hello\"", "auth_date": str(auth_date)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    raw["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    init_data = urlencode(raw)
+
+    with pytest.raises(TelegramAuthError, match="Invalid user data"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_user_json_is_null():
+    auth_date = int(time.time())
+    raw = {"user": "null", "auth_date": str(auth_date)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    raw["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    init_data = urlencode(raw)
+
+    with pytest.raises(TelegramAuthError, match="Invalid user data"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_user_id_missing():
+    auth_date = int(time.time())
+    raw = {"user": json.dumps({"username": "u"}), "auth_date": str(auth_date)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    raw["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    init_data = urlencode(raw)
+
+    with pytest.raises(TelegramAuthError, match="Invalid user id"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_user_id_string():
+    auth_date = int(time.time())
+    raw = {"user": json.dumps({"id": "abc"}), "auth_date": str(auth_date)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    raw["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    init_data = urlencode(raw)
+
+    with pytest.raises(TelegramAuthError, match="Invalid user id"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_user_id_bool():
+    auth_date = int(time.time())
+    raw = {"user": json.dumps({"id": True}), "auth_date": str(auth_date)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    raw["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    init_data = urlencode(raw)
+
+    with pytest.raises(TelegramAuthError, match="Invalid user id"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_user_id_zero():
+    auth_date = int(time.time())
+    raw = {"user": json.dumps({"id": 0}), "auth_date": str(auth_date)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    raw["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    init_data = urlencode(raw)
+
+    with pytest.raises(TelegramAuthError, match="Invalid user id"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_user_id_negative():
+    auth_date = int(time.time())
+    raw = {"user": json.dumps({"id": -5}), "auth_date": str(auth_date)}
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(raw.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    raw["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    init_data = urlencode(raw)
+
+    with pytest.raises(TelegramAuthError, match="Invalid user id"):
+        verify_telegram_init_data(init_data, BOT_TOKEN)
+
+
+def test_user_id_valid_positive_integer():
+    init_data = _make_init_data(user_id=42)
+    result = verify_telegram_init_data(init_data, BOT_TOKEN)
+    assert result["id"] == 42
+
+
+# --- Endpoint tests ---
 
 
 @pytest.mark.asyncio
@@ -272,3 +443,25 @@ async def test_api_me_db_error_returns_safe_500():
         assert "db-host" not in body.get("detail", "")
         assert "5432" not in body.get("detail", "")
         assert "connection refused" not in body.get("detail", "")
+
+
+@pytest.mark.asyncio
+async def test_api_me_db_error_no_sensitive_in_logs(caplog):
+    from backend.main import app
+    init_data = _make_init_data()
+
+    evil_exc = Exception(
+        "password=secret123 host=db.example.com:5432 "
+        "initData=ABCDEF hash=deadbeef"
+    )
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", side_effect=evil_exc):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/me", headers={"X-Telegram-Init-Data": init_data})
+
+        assert resp.status_code == 500
+        assert "password=secret123" not in caplog.text
+        assert "db.example.com" not in caplog.text
+        assert "deadbeef" not in caplog.text

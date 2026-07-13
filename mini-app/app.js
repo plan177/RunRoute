@@ -1564,7 +1564,7 @@ function initFeedback() {
 
         try {
             const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
-            const resp = await fetch('/api/feedback', {
+            const resp = await fetch(apiUrl('/api/feedback'), {
                 method: 'POST',
                 headers: getApiHeaders(),
                 body: JSON.stringify({
@@ -1600,7 +1600,7 @@ async function loadCurrentUser() {
         return;
     }
     try {
-        const resp = await fetch('/api/me', { headers: getApiHeaders() });
+        const resp = await fetch(apiUrl('/api/me'), { headers: getApiHeaders() });
         if (resp.ok) {
             const data = await resp.json();
             currentUser = data.user;

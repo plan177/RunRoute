@@ -26,7 +26,8 @@ async def upsert_user(
                 first_name = EXCLUDED.first_name,
                 last_name = EXCLUDED.last_name,
                 language_code = EXCLUDED.language_code,
-                telegram_photo_url = EXCLUDED.telegram_photo_url
+                telegram_photo_url = EXCLUDED.telegram_photo_url,
+                is_active = true
             RETURNING id, telegram_user_id, telegram_username, first_name, last_name, language_code, telegram_photo_url
             """,
             telegram_user_id,

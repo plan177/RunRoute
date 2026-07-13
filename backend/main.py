@@ -116,7 +116,7 @@ async def get_me(telegram_user: dict = Depends(get_current_telegram_user)):
         profile = await get_profile(user["id"])
         return {"user": user, "profile": profile}
     except Exception:
-        logger.exception("Failed to fetch user")
+        logger.error("Failed to synchronize current user")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

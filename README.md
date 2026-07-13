@@ -167,16 +167,25 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
 Mini App передаёт `Telegram.WebApp.initData` в заголовке `X-Telegram-Init-Data` при каждом запросе к защищённым endpoints.
 
-**Как настроить API URL в Vercel:**
+**Настройка API URL:**
 
-API работает на Railway. Mini App на Vercel использует относительные пути (`/api/me`), поэтому 필요ен reverse proxy или CORS. Для разработки:
+Mini App определяет API base URL через `mini-app/config.js`:
 
-```bash
-# Railway API URL для прямых запросов
-RAILWAY_API_URL=https://your-api.up.railway.app
+```js
+window.RUNROUTE_CONFIG = {
+    API_BASE_URL: 'https://your-api.up.railway.app'
+};
 ```
 
-В продакшене Mini App и API должны быть на одном домене через reverse proxy, либо CORS настроен на домен Vercel.
+Для локальной разработки оставьте `API_BASE_URL` пустым — будут использоваться относительные пути.
+
+**Настройка Railway:**
+
+В переменных Railway API service `ALLOWED_ORIGINS` должен содержать домен Vercel:
+
+```
+ALLOWED_ORIGINS=https://run-route-ten.vercel.app
+```
 
 **GET /api/me:**
 
