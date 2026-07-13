@@ -46,8 +46,7 @@ CREATE TRIGGER trg_planned_runs_updated_at
 CREATE INDEX IF NOT EXISTS idx_planned_runs_user_starts
     ON public.planned_runs (user_id, starts_at);
 
-CREATE INDEX IF NOT EXISTS idx_planned_runs_future
-    ON public.planned_runs (user_id, starts_at)
-    WHERE status = 'planned' AND starts_at > now();
+CREATE INDEX IF NOT EXISTS idx_planned_runs_status_starts
+    ON public.planned_runs (user_id, status, starts_at);
 
 ALTER TABLE public.planned_runs ENABLE ROW LEVEL SECURITY;
