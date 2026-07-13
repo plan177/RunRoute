@@ -1,10 +1,7 @@
-import os
-import hashlib
-import hmac
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, HTTPException, Request, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import httpx
@@ -12,6 +9,8 @@ from .route_generator import RouteGenerator
 from .models import RouteRequest, RouteResponse, FeedbackRequest
 from .config import get_settings
 from .database import init_db_pool, close_db_pool, check_database_connection
+from .auth import get_current_telegram_user
+from .users import upsert_user, get_profile
 import uvicorn
 
 logging.basicConfig(level=logging.INFO)
@@ -68,20 +67,6 @@ def check_rate_limit(ip: str, max_requests: int = 10, window_seconds: int = 60) 
     return True
 
 
-def verify_telegram_init_data(init_data: str, bot_token: str) -> bool:
-    try:
-        data_dict = dict(item.split("=") for item in init_data.split("&") if "=" in item)
-        hash_value = data_dict.pop("hash", None)
-        if not hash_value:
-            return False
-        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_dict.items()))
-        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-        calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(calculated_hash, hash_value)
-    except Exception:
-        return False
-
-
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
     if request.url.path not in EXEMPT_PATHS:
@@ -115,6 +100,24 @@ async def health_ready():
 @app.get("/api/health")
 async def api_health():
     return {"status": "ok"}
+
+
+@app.get("/api/me")
+async def get_me(telegram_user: dict = Depends(get_current_telegram_user)):
+    try:
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        profile = await get_profile(user["id"])
+        return {"user": user, "profile": profile}
+    except Exception:
+        logger.error("Failed to synchronize current user")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/")
@@ -155,10 +158,11 @@ async def generate_route(request: RouteRequest, http_request: Request):
     bot_token = settings.BOT_TOKEN.get_secret_value()
     init_data = http_request.headers.get("X-Telegram-Init-Data")
 
-    if bot_token:
-        if not init_data:
-            logger.warning("Missing Telegram init data")
-        elif not verify_telegram_init_data(init_data, bot_token):
+    if bot_token and init_data:
+        from .auth import verify_telegram_init_data, TelegramAuthError
+        try:
+            verify_telegram_init_data(init_data, bot_token, settings.TELEGRAM_AUTH_MAX_AGE_SECONDS)
+        except TelegramAuthError:
             raise HTTPException(status_code=401, detail="Invalid authentication")
 
     if not (-90 <= request.lat <= 90):

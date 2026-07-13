@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     WEB_APP_URL: str = "https://run-route-ten.vercel.app"
     SECRET_KEY: SecretStr = SecretStr("")
     ALLOWED_ORIGINS: str = "http://localhost:8080,http://localhost:3000"
+    TELEGRAM_AUTH_MAX_AGE_SECONDS: int = 86400
 
     class Config:
         env_file = ".env"

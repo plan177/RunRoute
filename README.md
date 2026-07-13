@@ -161,6 +161,64 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 | `GET /health/live` | Проверка: процесс API работает |
 | `GET /health/ready` | Проверка: API подключён к PostgreSQL (200/503) |
 | `GET /api/health` | Совместимый liveness alias |
+| `GET /api/me` | Текущий пользователь (требует Telegram initData) |
+
+### Telegram Authentication
+
+Mini App передаёт `Telegram.WebApp.initData` в заголовке `X-Telegram-Init-Data` при каждом запросе к защищённым endpoints.
+
+**Настройка API URL:**
+
+Mini App определяет API base URL через `mini-app/config.js`:
+
+```js
+window.RUNROUTE_CONFIG = {
+    API_BASE_URL: 'https://your-api.up.railway.app'
+};
+```
+
+Для локальной разработки оставьте `API_BASE_URL` пустым — будут использоваться относительные пути.
+
+**Настройка Railway:**
+
+В переменных Railway API service `ALLOWED_ORIGINS` должен содержать домен Vercel:
+
+```
+ALLOWED_ORIGINS=https://run-route-ten.vercel.app
+```
+
+**GET /api/me:**
+
+Проверяет Telegram initData, создаёт/обновляет пользователя в `public.users`, возвращает данные текущего пользователя:
+
+```json
+{
+  "user": {
+    "id": "uuid",
+    "telegram_user_id": 123,
+    "telegram_username": "user",
+    "first_name": "Name",
+    "last_name": "Last",
+    "language_code": "ru",
+    "telegram_photo_url": "https://..."
+  },
+  "profile": null
+}
+```
+
+**Ограничение срока жизни initData:**
+
+По умолчанию `TELEGRAM_AUTH_MAX_AGE_SECONDS=86400` (24 часа). Значение настраивается через переменную окружения.
+
+**Ручная проверка внутри Telegram:**
+
+1. Откройте Mini App через бота
+2. В DevTools (Chrome DevTools Remote Debugging) проверьте Network → `/api/me` → Headers → `X-Telegram-Init-Data`
+3. Ответ должен содержать `user` с `telegram_user_id`
+
+**Запрос из обычного браузера:**
+
+Без Telegram initData запрос `/api/me` вернёт 401. Это ожидаемое поведение — Mini App работает только внутри Telegram.
 
 ### Миграции
 
