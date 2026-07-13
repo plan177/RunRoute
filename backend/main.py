@@ -10,7 +10,9 @@ from .models import RouteRequest, RouteResponse, FeedbackRequest
 from .config import get_settings
 from .database import init_db_pool, close_db_pool, check_database_connection
 from .auth import get_current_telegram_user
-from .users import upsert_user, get_profile
+from .users import upsert_user
+from .profiles import get_profile, upsert_profile
+from .models import ProfileUpdateRequest
 import uvicorn
 
 logging.basicConfig(level=logging.INFO)
@@ -118,6 +120,54 @@ async def get_me(telegram_user: dict = Depends(get_current_telegram_user)):
         return {"user": user, "profile": profile}
     except Exception:
         logger.error("Failed to synchronize current user")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/profile")
+async def get_profile_endpoint(telegram_user: dict = Depends(get_current_telegram_user)):
+    try:
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        profile = await get_profile(user["id"])
+        return {"user": user, "profile": profile}
+    except Exception:
+        logger.error("Failed to fetch profile")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.put("/api/profile")
+async def update_profile_endpoint(
+    request: ProfileUpdateRequest,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        social = request.social_links.model_dump() if request.social_links else {}
+        profile = await upsert_profile(
+            user_id=user["id"],
+            display_name=request.display_name,
+            bio=request.bio,
+            city=request.city,
+            club_name=request.club_name,
+            avatar_url=request.avatar_url,
+            social_links=social,
+        )
+        return {"user": user, "profile": profile}
+    except Exception:
+        logger.error("Failed to update profile")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

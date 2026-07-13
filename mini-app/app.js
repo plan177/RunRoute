@@ -1612,6 +1612,182 @@ async function loadCurrentUser() {
     }
 }
 
+// === User menu ===
+
+function initMenu() {
+    const btn = document.getElementById('menu-btn');
+    const menu = document.getElementById('user-menu');
+    const profileBtn = document.getElementById('menu-profile');
+    const calendarBtn = document.getElementById('menu-calendar');
+    const feedbackBtn = document.getElementById('menu-feedback');
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.classList.toggle('hidden');
+    });
+
+    document.addEventListener('click', () => {
+        menu.classList.add('hidden');
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            menu.classList.add('hidden');
+        }
+    });
+
+    menu.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+
+    profileBtn.addEventListener('click', () => {
+        menu.classList.add('hidden');
+        openProfileModal();
+    });
+
+    calendarBtn.addEventListener('click', () => {
+        menu.classList.add('hidden');
+    });
+
+    feedbackBtn.addEventListener('click', () => {
+        menu.classList.add('hidden');
+        document.getElementById('feedback-modal').classList.remove('hidden');
+        document.getElementById('feedback-text').focus();
+    });
+}
+
+// === Profile modal ===
+
+function openProfileModal() {
+    const modal = document.getElementById('profile-modal');
+    const loading = document.getElementById('profile-loading');
+    const form = document.getElementById('profile-form');
+    const status = document.getElementById('profile-status');
+
+    if (!isTelegramApp()) {
+        modal.classList.remove('hidden');
+        loading.classList.add('hidden');
+        form.classList.add('hidden');
+        status.textContent = 'Профиль доступен только внутри Telegram';
+        status.className = 'profile-status error';
+        status.classList.remove('hidden');
+        return;
+    }
+
+    modal.classList.remove('hidden');
+    loading.classList.remove('hidden');
+    form.classList.add('hidden');
+    status.classList.add('hidden');
+
+    loadProfileData();
+}
+
+async function loadProfileData() {
+    const loading = document.getElementById('profile-loading');
+    const form = document.getElementById('profile-form');
+
+    try {
+        const resp = await fetch(apiUrl('/api/profile'), { headers: getApiHeaders() });
+        if (!resp.ok) throw new Error('Failed to load profile');
+
+        const data = await resp.json();
+        const profile = data.profile || {};
+
+        document.getElementById('profile-display-name').value = profile.display_name || '';
+        document.getElementById('profile-bio').value = profile.bio || '';
+        document.getElementById('profile-city').value = profile.city || '';
+        document.getElementById('profile-club-name').value = profile.club_name || '';
+        document.getElementById('profile-avatar-url').value = profile.avatar_url || '';
+
+        const sl = profile.social_links || {};
+        document.getElementById('profile-social-telegram').value = sl.telegram || '';
+        document.getElementById('profile-social-instagram').value = sl.instagram || '';
+        document.getElementById('profile-social-strava').value = sl.strava || '';
+        document.getElementById('profile-social-vk').value = sl.vk || '';
+        document.getElementById('profile-social-website').value = sl.website || '';
+
+        loading.classList.add('hidden');
+        form.classList.remove('hidden');
+    } catch (e) {
+        loading.classList.add('hidden');
+        const status = document.getElementById('profile-status');
+        status.textContent = 'Не удалось загрузить профиль';
+        status.className = 'profile-status error';
+        status.classList.remove('hidden');
+        form.classList.remove('hidden');
+    }
+}
+
+function initProfile() {
+    const modal = document.getElementById('profile-modal');
+    const saveBtn = document.getElementById('profile-save');
+    const cancelBtn = document.getElementById('profile-cancel');
+    const status = document.getElementById('profile-status');
+
+    cancelBtn.addEventListener('click', () => {
+        modal.classList.add('hidden');
+    });
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.classList.add('hidden');
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+            modal.classList.add('hidden');
+        }
+    });
+
+    saveBtn.addEventListener('click', async () => {
+        if (!isTelegramApp()) return;
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Сохранение...';
+        status.classList.add('hidden');
+
+        const body = {
+            display_name: document.getElementById('profile-display-name').value || null,
+            bio: document.getElementById('profile-bio').value || null,
+            city: document.getElementById('profile-city').value || null,
+            club_name: document.getElementById('profile-club-name').value || null,
+            avatar_url: document.getElementById('profile-avatar-url').value || null,
+            social_links: {
+                telegram: document.getElementById('profile-social-telegram').value || null,
+                instagram: document.getElementById('profile-social-instagram').value || null,
+                strava: document.getElementById('profile-social-strava').value || null,
+                vk: document.getElementById('profile-social-vk').value || null,
+                website: document.getElementById('profile-social-website').value || null,
+            }
+        };
+
+        try {
+            const resp = await fetch(apiUrl('/api/profile'), {
+                method: 'PUT',
+                headers: getApiHeaders(),
+                body: JSON.stringify(body)
+            });
+
+            if (resp.ok) {
+                status.textContent = 'Профиль сохранён';
+                status.className = 'profile-status success';
+                status.classList.remove('hidden');
+            } else {
+                const data = await resp.json().catch(() => ({}));
+                status.textContent = data.detail || 'Ошибка сохранения';
+                status.className = 'profile-status error';
+                status.classList.remove('hidden');
+            }
+        } catch (e) {
+            status.textContent = 'Ошибка сети';
+            status.className = 'profile-status error';
+            status.classList.remove('hidden');
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Сохранить';
+        }
+    });
+}
+
 // === Init all ===
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1624,6 +1800,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initTelegram();
     initShare();
     initFeedback();
+    initMenu();
+    initProfile();
     initInsertMode();
     initGPS();
     loadCurrentUser();

@@ -1223,3 +1223,142 @@ body {
     .metric-value { font-size: 18px; }
     .map { height: 45vh; min-height: 220px; }
 }
+
+/* User menu */
+.menu-wrapper {
+    position: relative;
+}
+
+.user-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    min-width: 180px;
+    background: var(--elevated);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+    z-index: 100;
+    overflow: hidden;
+}
+
+.user-menu.hidden {
+    display: none;
+}
+
+.menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 12px 16px;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.menu-item:hover {
+    background: var(--glass);
+}
+
+.menu-item:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.menu-badge {
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--glass);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+/* Profile modal */
+.modal-profile {
+    max-height: 80vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.profile-loading {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.skeleton {
+    background: var(--glass);
+    border-radius: var(--radius-xs);
+    height: 16px;
+    animation: pulse 1.5s infinite;
+}
+
+.skeleton-line {
+    width: 100%;
+}
+
+.skeleton-line.short {
+    width: 60%;
+}
+
+.profile-form {
+    padding: 16px;
+}
+
+.profile-field {
+    margin-bottom: 12px;
+}
+
+.profile-field label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.profile-field input,
+.profile-field textarea {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xs);
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.profile-field input:focus,
+.profile-field textarea:focus {
+    border-color: var(--primary);
+}
+
+.profile-field textarea {
+    resize: vertical;
+    min-height: 60px;
+}
+
+.profile-status {
+    padding: 8px 12px;
+    border-radius: var(--radius-xs);
+    font-size: 13px;
+    margin-bottom: 12px;
+}
+
+.profile-status.success {
+    background: rgba(57, 255, 20, 0.1);
+    color: var(--primary);
+}
+
+.profile-status.error {
+    background: rgba(255, 59, 92, 0.1);
+    color: var(--danger);
+}
