@@ -237,6 +237,8 @@ class PlannedRunCreate(BaseModel):
     def validate_starts_at(cls, v):
         if v.tzinfo is None:
             raise ValueError("starts_at must be timezone-aware")
+        if v < datetime.now(v.tzinfo):
+            raise ValueError("starts_at must not be in the past")
         return v
 
     @field_validator("duration_minutes")

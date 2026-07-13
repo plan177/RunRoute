@@ -90,13 +90,7 @@ async def get_planned_run(user_id: UUID, run_id: UUID) -> Optional[dict]:
 async def update_planned_run(
     user_id: UUID,
     run_id: UUID,
-    title: Optional[str] = None,
-    starts_at: Optional[datetime] = None,
-    saved_route_id: Optional[UUID] = None,
-    duration_minutes: Optional[int] = None,
-    notes: Optional[str] = None,
-    reminder_minutes: Optional[int] = None,
-    notifications_enabled: Optional[bool] = None,
+    fields: dict,
 ) -> Optional[dict]:
     existing = await get_planned_run(user_id, run_id)
     if existing is None:
@@ -104,30 +98,35 @@ async def update_planned_run(
 
     pool = get_db_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE public.planned_runs SET
-                saved_route_id = COALESCE($3, saved_route_id),
-                title = COALESCE($4, title),
-                starts_at = COALESCE($5, starts_at),
-                duration_minutes = COALESCE($6, duration_minutes),
-                notes = COALESCE($7, notes),
-                reminder_minutes = COALESCE($8, reminder_minutes),
-                notifications_enabled = COALESCE($9, notifications_enabled)
+        if "saved_route_id" in fields:
+            rid = fields["saved_route_id"]
+            if rid is not None:
+                route_check = await conn.fetchval(
+                    "SELECT id FROM public.saved_routes WHERE id = $1 AND user_id = $2",
+                    rid, user_id,
+                )
+                if route_check is None:
+                    return "route_not_found"
+
+        set_clauses = []
+        params = [run_id, user_id]
+        idx = 3
+        for key in ("saved_route_id", "title", "starts_at", "duration_minutes", "notes", "reminder_minutes", "notifications_enabled"):
+            if key in fields:
+                set_clauses.append(f"{key} = ${idx}")
+                params.append(fields[key])
+                idx += 1
+
+        if not set_clauses:
+            return dict(existing)
+
+        sql = f"""
+            UPDATE public.planned_runs SET {', '.join(set_clauses)}
             WHERE id = $1 AND user_id = $2
             RETURNING id, saved_route_id, title, starts_at, duration_minutes, notes,
                       reminder_minutes, notifications_enabled, status, created_at, updated_at
-            """,
-            run_id,
-            user_id,
-            saved_route_id,
-            title,
-            starts_at,
-            duration_minutes,
-            notes,
-            reminder_minutes,
-            notifications_enabled,
-        )
+        """
+        row = await conn.fetchrow(sql, *params)
     return dict(row) if row else None
 
 

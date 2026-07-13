@@ -306,7 +306,7 @@ async def test_create_run_route_not_found():
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post("/api/calendar/runs", json={
-                "title": "Run", "starts_at": "2025-12-01T09:00:00+03:00",
+                "title": "Run", "starts_at": "2027-12-01T09:00:00+03:00",
                 "saved_route_id": "00000000-0000-0000-0000-000000000099",
             }, headers={"X-Telegram-Init-Data": init_data})
         assert resp.status_code == 404
@@ -473,3 +473,98 @@ async def test_health_endpoints_public():
         for path in ["/health/live", "/health/ready", "/api/health"]:
             resp = await client.get(path)
             assert resp.status_code in (200, 503)
+
+
+# --- Past date rejection ---
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_past_date():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/api/calendar/runs", json={
+                "title": "Run", "starts_at": "2020-01-01T09:00:00+03:00",
+            }, headers={"X-Telegram-Init-Data": init_data})
+        assert resp.status_code == 422
+
+
+# --- Ownership check for saved_route_id ---
+
+
+@pytest.mark.asyncio
+async def test_update_run_route_ownership():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.update_planned_run", new_callable=lambda: AsyncMock(return_value="route_not_found")):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/calendar/runs/00000000-0000-0000-0000-000000000099",
+                json={"saved_route_id": "00000000-0000-0000-0000-000000000088"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 404
+
+
+# --- Nullable field clearing ---
+
+
+@pytest.mark.asyncio
+async def test_update_run_clears_nullable_fields():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.update_planned_run", new_callable=lambda: AsyncMock(return_value={
+             "id": "test-id", "duration_minutes": None, "notes": None, "reminder_minutes": None,
+         })) as mock_update:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/calendar/runs/00000000-0000-0000-0000-000000000099",
+                json={"duration_minutes": None, "notes": None, "reminder_minutes": None},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+        call_kwargs = mock_update.call_args[1]
+        assert "duration_minutes" in call_kwargs["fields"]
+        assert call_kwargs["fields"]["duration_minutes"] is None
+
+
+# --- Exclude unset (absent vs null) ---
+
+
+@pytest.mark.asyncio
+async def test_update_run_only_sends_provided_fields():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.update_planned_run", new_callable=lambda: AsyncMock(return_value={
+             "id": "test-id", "title": "Updated",
+         })) as mock_update:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/calendar/runs/00000000-0000-0000-0000-000000000099",
+                json={"title": "Updated"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+        call_kwargs = mock_update.call_args[1]
+        assert "title" in call_kwargs["fields"]
+        assert "duration_minutes" not in call_kwargs["fields"]
+        assert "notes" not in call_kwargs["fields"]

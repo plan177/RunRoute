@@ -82,9 +82,11 @@ describe('production code regression', () => {
         assert.ok(appJs.includes('loadCurrentUser()'), 'DOMContentLoaded must call loadCurrentUser');
     });
 
-    it('calendar button is disabled', () => {
-        assert.ok(indexHtml.includes('menu-calendar') && indexHtml.includes('disabled'),
-            'calendar menu item must be disabled');
+    it('calendar button is enabled', () => {
+        assert.ok(indexHtml.includes('menu-calendar'),
+            'calendar menu item must exist');
+        assert.ok(!indexHtml.includes('menu-calendar" class="menu-item" disabled'),
+            'calendar menu item must not be disabled');
     });
 
     it('profile requests use apiUrl', () => {

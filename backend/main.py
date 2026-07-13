@@ -372,19 +372,12 @@ async def update_run_endpoint(
             language_code=telegram_user.get("language_code"),
             photo_url=telegram_user.get("photo_url"),
         )
-        run = await update_planned_run(
-            user_id=user["id"],
-            run_id=UUID(run_id),
-            title=request.title,
-            starts_at=request.starts_at,
-            saved_route_id=request.saved_route_id,
-            duration_minutes=request.duration_minutes,
-            notes=request.notes,
-            reminder_minutes=request.reminder_minutes,
-            notifications_enabled=request.notifications_enabled,
-        )
+        fields = request.model_dump(exclude_unset=True)
+        run = await update_planned_run(user_id=user["id"], run_id=UUID(run_id), fields=fields)
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
+        if run == "route_not_found":
+            raise HTTPException(status_code=404, detail="Saved route not found")
         return run
     except HTTPException:
         raise

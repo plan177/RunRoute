@@ -1889,14 +1889,15 @@ function openSaveRouteModal() {
 // === Calendar ===
 
 let calYear, calMonth, calSelectedDate, calRuns = [], calRoutes = [];
+let editingRunId = null;
 
 function initCalendar() {
     const now = new Date();
     calYear = now.getFullYear();
     calMonth = now.getMonth();
 
-    document.getElementById('cal-prev').addEventListener('click', () => { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendar(); });
-    document.getElementById('cal-next').addEventListener('click', () => { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendar(); });
+    document.getElementById('cal-prev').addEventListener('click', async () => { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } await loadCalendarData(); renderCalendar(); });
+    document.getElementById('cal-next').addEventListener('click', async () => { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } await loadCalendarData(); renderCalendar(); });
     document.getElementById('cal-add-run').addEventListener('click', openRunForm);
     document.getElementById('calendar-close').addEventListener('click', () => document.getElementById('calendar-modal').classList.add('hidden'));
     document.getElementById('calendar-modal').addEventListener('click', e => { if (e.target.id === 'calendar-modal') e.target.classList.add('hidden'); });
@@ -1904,6 +1905,23 @@ function initCalendar() {
     document.getElementById('run-form-save').addEventListener('click', saveRun);
     document.getElementById('run-form-cancel').addEventListener('click', () => document.getElementById('run-form-modal').classList.add('hidden'));
     document.getElementById('run-form-modal').addEventListener('click', e => { if (e.target.id === 'run-form-modal') e.target.classList.add('hidden'); });
+}
+
+async function loadCalendarData() {
+    try {
+        const [runsResp, routesResp] = await Promise.all([
+            fetch(apiUrl(`/api/calendar/runs?from=${getMonthStart()}&to=${getMonthEnd()}`), { headers: getApiHeaders() }),
+            fetch(apiUrl('/api/routes'), { headers: getApiHeaders() }),
+        ]);
+        if (runsResp.ok) {
+            const runsData = await runsResp.json();
+            calRuns = runsData.runs || [];
+        }
+        if (routesResp.ok) {
+            const routesData = await routesResp.json();
+            calRoutes = routesData.routes || [];
+        }
+    } catch (e) { /* silent */ }
 }
 
 async function openCalendar() {
@@ -1928,17 +1946,7 @@ async function openCalendar() {
     status.classList.add('hidden');
 
     try {
-        const [runsResp, routesResp] = await Promise.all([
-            fetch(apiUrl(`/api/calendar/runs?from=${getMonthStart()}&to=${getMonthEnd()}`), { headers: getApiHeaders() }),
-            fetch(apiUrl('/api/routes'), { headers: getApiHeaders() }),
-        ]);
-        if (!runsResp.ok) throw new Error('Failed to load runs');
-        const runsData = await runsResp.json();
-        calRuns = runsData.runs || [];
-        if (routesResp.ok) {
-            const routesData = await routesResp.json();
-            calRoutes = routesData.routes || [];
-        }
+        await loadCalendarData();
         loading.classList.add('hidden');
         content.classList.remove('hidden');
         renderCalendar();
@@ -2037,7 +2045,7 @@ async function saveRun() {
         status.className = 'profile-status error';
         status.classList.remove('hidden');
         saveBtn.disabled = false;
-        saveBtn.textContent = 'Создать';
+        saveBtn.textContent = editingRunId ? 'Сохранить' : 'Создать';
         return;
     }
     const body = {
@@ -2049,18 +2057,20 @@ async function saveRun() {
         notifications_enabled: document.getElementById('run-notifications').checked,
     };
     const routeId = document.getElementById('run-route-select').value;
-    if (routeId) body.saved_route_id = routeId;
+    if (routeId) body.saved_route_id = routeId; else body.saved_route_id = null;
+    const isEdit = !!editingRunId;
+    const url = isEdit ? `/api/calendar/runs/${editingRunId}` : '/api/calendar/runs';
+    const method = isEdit ? 'PUT' : 'POST';
     try {
-        const resp = await fetch(apiUrl('/api/calendar/runs'), {
-            method: 'POST', headers: getApiHeaders(), body: JSON.stringify(body),
+        const resp = await fetch(apiUrl(url), {
+            method, headers: getApiHeaders(), body: JSON.stringify(body),
         });
         if (resp.ok) {
             document.getElementById('run-form-modal').classList.add('hidden');
-            showToast('Пробежка создана');
-            const from = getMonthStart();
-            const to = getMonthEnd();
-            const runsResp = await fetch(apiUrl(`/api/calendar/runs?from=${from}&to=${to}`), { headers: getApiHeaders() });
-            if (runsResp.ok) { calRuns = (await runsResp.json()).runs || []; renderCalendar(); }
+            showToast(isEdit ? 'Пробежка обновлена' : 'Пробежка создана');
+            editingRunId = null;
+            await loadCalendarData();
+            renderCalendar();
         } else {
             const data = await resp.json().catch(() => ({}));
             status.textContent = data.detail || 'Ошибка';
@@ -2073,11 +2083,12 @@ async function saveRun() {
         status.classList.remove('hidden');
     } finally {
         saveBtn.disabled = false;
-        saveBtn.textContent = 'Создать';
+        saveBtn.textContent = isEdit ? 'Сохранить' : 'Создать';
     }
 }
 
 function openRunForm(editRun) {
+    editingRunId = editRun ? editRun.id : null;
     document.getElementById('run-title').value = editRun ? editRun.title : '';
     document.getElementById('run-date').value = editRun ? new Date(editRun.starts_at).toISOString().slice(0, 16) : '';
     document.getElementById('run-duration').value = editRun && editRun.duration_minutes ? editRun.duration_minutes : '';
@@ -2094,6 +2105,7 @@ function openRunForm(editRun) {
         select.appendChild(opt);
     });
     document.getElementById('run-form-status').classList.add('hidden');
+    document.getElementById('run-form-save').textContent = editRun ? 'Сохранить' : 'Создать';
     document.getElementById('run-form-modal').classList.remove('hidden');
 }
 
