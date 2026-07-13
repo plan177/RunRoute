@@ -38,6 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_users_username
     WHERE telegram_username IS NOT NULL;
 
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+-- RLS policies (anon/authenticated) are intentionally absent until Telegram auth is implemented.
 
 -- profiles
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -64,3 +65,4 @@ CREATE INDEX IF NOT EXISTS idx_profiles_city
     WHERE is_public = true;
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+-- RLS policies (anon/authenticated) are intentionally absent until Telegram auth is implemented.

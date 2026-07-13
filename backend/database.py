@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import asyncpg
 from .config import get_settings
 
@@ -41,8 +42,9 @@ async def check_database_connection() -> bool:
     if _pool is None:
         return False
     try:
-        async with _pool.acquire() as conn:
-            await conn.fetchval("SELECT 1")
+        async with asyncio.timeout(5):
+            async with _pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
         return True
     except Exception:
         logger.warning("Database connection check failed")

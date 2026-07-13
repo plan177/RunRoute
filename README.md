@@ -146,10 +146,51 @@ node --test tests/route-utils.test.js tests/makeGPX.test.js tests/pace-utils.tes
 
 Тесты используют встроенный `node:test` и `node:assert/strict`. Дополнительные зависимости не требуются.
 
+## Backend API
+
+### Локальный запуск
+
+```bash
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+### Endpoints
+
+| Endpoint | Описание |
+|----------|----------|
+| `GET /health/live` | Проверка: процесс API работает |
+| `GET /health/ready` | Проверка: API подключён к PostgreSQL (200/503) |
+| `GET /api/health` | Совместимый liveness alias |
+
+### Миграции
+
+```bash
+python -m backend.migrate
+```
+
+- Миграции **не выполняются** автоматически при старте API
+- Повторный запуск пропускает уже применённые файлы
+- Перед применением production-миграции проверьте `DATABASE_URL`
+- Секреты нельзя передавать в командной строке или коммитить
+
+### Railway
+
+Существующий RunRoute service продолжает запускать `python bot.py`.
+
+API нужно создать **отдельным Railway service** из того же GitHub repo:
+
+| Параметр | Значение |
+|----------|----------|
+| Start command | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` |
+| Healthcheck path | `/health/ready` |
+| Variables | Собственный набор Railway Variables (DATABASE_URL, BOT_TOKEN, SECRET_KEY) |
+
+Миграцию применяем отдельно один раз после review.
+
 ## Ограничения
 
 - Основная клиентская логика находится в `mini-app/app.js` (1600+ строк)
-- Backend API (`backend/`) и база данных не используются в текущей версии
+- Backend и схема БД подготовлены; профильные endpoints и подключение Mini App будут добавлены следующими этапами
 - Профили, подписки, календарь пробежек и социальная карта пока не реализованы
 - Секреты (токены, ключи) нельзя хранить в клиентском коде
 - Маршруты строятся через публичный Valhalla API (ограничения на количество запросов)

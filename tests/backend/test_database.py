@@ -8,7 +8,7 @@ def test_pool_not_created_on_import():
 
 
 @pytest.mark.asyncio
-async def test_init_calls_create_pool():
+async def test_init_calls_create_pool_with_limits():
     mock_pool = AsyncMock()
     with patch("backend.database.asyncpg.create_pool", new_callable=AsyncMock, return_value=mock_pool) as mock_create, \
          patch("backend.database.get_settings") as mock_settings:
@@ -18,7 +18,10 @@ async def test_init_calls_create_pool():
 
         await database.init_db_pool()
         assert database._pool is mock_pool
-        mock_create.assert_called_once()
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs["min_size"] == 1
+        assert call_kwargs["max_size"] == 5
+        assert call_kwargs["command_timeout"] == 10
 
 
 @pytest.mark.asyncio
@@ -40,4 +43,24 @@ async def test_check_returns_false_on_error():
     database._pool = mock_pool
     result = await database.check_database_connection()
     assert result is False
+    database._pool = None
+
+
+@pytest.mark.asyncio
+async def test_check_returns_false_on_timeout():
+    mock_pool = AsyncMock()
+    mock_pool.acquire = MagicMock(side_effect=TimeoutError("timeout"))
+    database._pool = mock_pool
+    result = await database.check_database_connection()
+    assert result is False
+    database._pool = None
+
+
+@pytest.mark.asyncio
+async def test_check_no_secret_in_logs(caplog):
+    mock_pool = AsyncMock()
+    mock_pool.acquire = MagicMock(side_effect=Exception("supersecret"))
+    database._pool = mock_pool
+    await database.check_database_connection()
+    assert "supersecret" not in caplog.text
     database._pool = None
