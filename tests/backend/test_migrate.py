@@ -17,6 +17,7 @@ class _MockConn:
     def __init__(self, fetch_return=None):
         self.fetch_return = fetch_return or []
         self.execute_calls = []
+        self.events = []  # ordered journal: (op, sql)
         self.close_called = False
         self._execute_side_effect = None
 
@@ -25,11 +26,13 @@ class _MockConn:
 
     async def execute(self, sql, *args):
         self.execute_calls.append((sql, args))
+        self.events.append(("execute", sql))
         if self._execute_side_effect:
             return await self._execute_side_effect(sql, *args)
         return None
 
     async def fetch(self, sql, *args):
+        self.events.append(("fetch", sql))
         return self.fetch_return
 
     async def close(self):
@@ -37,6 +40,13 @@ class _MockConn:
 
     def set_execute_side_effect(self, func):
         self._execute_side_effect = func
+
+
+def _mock_settings(url="postgresql://u:p@h/d"):
+    mock = MagicMock()
+    mock.DATABASE_URL = MagicMock()
+    mock.DATABASE_URL.get_secret_value.return_value = url
+    return mock
 
 
 @pytest.mark.asyncio
@@ -47,7 +57,8 @@ async def test_file_sorting(tmp_path):
     conn = _MockConn()
 
     with patch("backend.migrate.asyncpg.connect", return_value=conn), \
-         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)):
+         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)), \
+         patch("backend.migrate.get_settings", return_value=_mock_settings()):
         await run_migrations()
 
     insert_calls = [(sql, args) for sql, args in conn.execute_calls if "INSERT INTO public.schema_migrations" in sql]
@@ -63,7 +74,8 @@ async def test_applied_migration_skipped(tmp_path):
     conn = _MockConn(fetch_return=[{"filename": "001_first.sql"}])
 
     with patch("backend.migrate.asyncpg.connect", return_value=conn), \
-         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)):
+         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)), \
+         patch("backend.migrate.get_settings", return_value=_mock_settings()):
         await run_migrations()
 
     insert_calls = [s for s in conn.execute_calls if "INSERT INTO public.schema_migrations" in s]
@@ -77,7 +89,8 @@ async def test_unlock_called(tmp_path):
     conn = _MockConn()
 
     with patch("backend.migrate.asyncpg.connect", return_value=conn), \
-         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)):
+         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)), \
+         patch("backend.migrate.get_settings", return_value=_mock_settings()):
         await run_migrations()
 
     unlock_calls = [sql for sql, _ in conn.execute_calls if "pg_advisory_unlock" in sql]
@@ -98,7 +111,8 @@ async def test_unlock_called_on_error(tmp_path):
     conn.set_execute_side_effect(execute_side_effect)
 
     with patch("backend.migrate.asyncpg.connect", return_value=conn), \
-         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)):
+         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)), \
+         patch("backend.migrate.get_settings", return_value=_mock_settings()):
         with pytest.raises(MigrationError):
             await run_migrations()
 
@@ -113,7 +127,8 @@ async def test_connection_closed(tmp_path):
     conn = _MockConn()
 
     with patch("backend.migrate.asyncpg.connect", return_value=conn), \
-         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)):
+         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)), \
+         patch("backend.migrate.get_settings", return_value=_mock_settings()):
         await run_migrations()
 
     assert conn.close_called
@@ -133,7 +148,8 @@ async def test_connection_closed_on_error(tmp_path):
     conn.set_execute_side_effect(execute_side_effect)
 
     with patch("backend.migrate.asyncpg.connect", return_value=conn), \
-         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)):
+         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)), \
+         patch("backend.migrate.get_settings", return_value=_mock_settings()):
         with pytest.raises(MigrationError):
             await run_migrations()
 
@@ -147,7 +163,8 @@ async def test_uses_public_schema_migrations(tmp_path):
     conn = _MockConn()
 
     with patch("backend.migrate.asyncpg.connect", return_value=conn), \
-         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)):
+         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)), \
+         patch("backend.migrate.get_settings", return_value=_mock_settings()):
         await run_migrations()
 
     assert any("public.schema_migrations" in sql for sql, _ in conn.execute_calls)
@@ -162,10 +179,34 @@ async def test_secret_not_in_logs(tmp_path, caplog):
 
     with patch("backend.migrate.asyncpg.connect", return_value=conn), \
          patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)), \
-         patch("backend.migrate.get_settings") as mock_settings:
-        mock_settings.return_value = MagicMock()
-        mock_settings.return_value.DATABASE_URL = MagicMock()
-        mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = "postgresql://u:supersecret@h/d"
+         patch("backend.migrate.get_settings", return_value=_mock_settings("postgresql://u:supersecret@h/d")):
         await run_migrations()
 
     assert "supersecret" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_migration_lock_order(tmp_path):
+    (tmp_path / "001_first.sql").write_text("SELECT 1;")
+
+    conn = _MockConn()
+
+    with patch("backend.migrate.asyncpg.connect", return_value=conn), \
+         patch("backend.migrate.MIGRATIONS_DIR", str(tmp_path)), \
+         patch("backend.migrate.get_settings", return_value=_mock_settings()):
+        await run_migrations()
+
+    events = conn.events
+    # Find indices of key events
+    lock_idx = next(i for i, (op, sql) in enumerate(events) if "pg_advisory_lock" in sql)
+    create_idx = next(i for i, (op, sql) in enumerate(events) if "CREATE TABLE" in sql)
+    select_idx = next(i for i, (op, sql) in enumerate(events) if "SELECT filename" in sql and "public.schema_migrations" in sql)
+    insert_idx = next(i for i, (op, sql) in enumerate(events) if "INSERT INTO public.schema_migrations" in sql)
+    unlock_idx = next(i for i, (op, sql) in enumerate(events) if "pg_advisory_unlock" in sql)
+
+    # Verify order: lock -> CREATE -> SELECT -> INSERT -> unlock
+    assert lock_idx < create_idx < select_idx < insert_idx < unlock_idx
+
+    # Verify unlock is last SQL event before close
+    sql_events = [e for e in events if e[0] == "execute" or e[0] == "fetch"]
+    assert events[unlock_idx] == sql_events[-1]

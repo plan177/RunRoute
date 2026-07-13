@@ -47,19 +47,24 @@ async def test_check_returns_false_on_error():
     database._pool = None
 
 
+class SlowAcquire:
+    async def __aenter__(self):
+        await asyncio.sleep(100)
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 @pytest.mark.asyncio
 async def test_check_returns_false_on_timeout(caplog):
-    async def slow_acquire():
-        await asyncio.sleep(100)
-        return AsyncMock()
-
     mock_pool = AsyncMock()
-    mock_pool.acquire = slow_acquire
+    mock_pool.acquire = MagicMock(return_value=SlowAcquire())
 
     with patch("backend.database.DB_HEALTH_TIMEOUT_SECONDS", 0.01):
         database._pool = mock_pool
         result = await database.check_database_connection()
         assert result is False
+        assert mock_pool.acquire.call_count == 1
         assert "supersecret" not in caplog.text
         database._pool = None
 
