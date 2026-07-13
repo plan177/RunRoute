@@ -1890,6 +1890,7 @@ function openSaveRouteModal() {
 
 let calYear, calMonth, calSelectedDate, calRuns = [], calRoutes = [];
 let editingRunId = null;
+let calRequestSeq = 0;
 
 function initCalendar() {
     const now = new Date();
@@ -1908,20 +1909,27 @@ function initCalendar() {
 }
 
 async function loadCalendarData() {
+    const seq = ++calRequestSeq;
+    const from = getMonthStart(calYear, calMonth);
+    const to = getMonthEnd(calYear, calMonth);
     try {
         const [runsResp, routesResp] = await Promise.all([
-            fetch(apiUrl(`/api/calendar/runs?from=${getMonthStart()}&to=${getMonthEnd()}`), { headers: getApiHeaders() }),
+            fetch(apiUrl(`/api/calendar/runs?from=${from}&to=${to}`), { headers: getApiHeaders() }),
             fetch(apiUrl('/api/routes'), { headers: getApiHeaders() }),
         ]);
-        if (runsResp.ok) {
-            const runsData = await runsResp.json();
-            calRuns = runsData.runs || [];
-        }
+        if (seq !== calRequestSeq) return;
+        if (!runsResp.ok) throw new Error('Failed to load runs');
+        const runsData = await runsResp.json();
+        calRuns = runsData.runs || [];
         if (routesResp.ok) {
             const routesData = await routesResp.json();
             calRoutes = routesData.routes || [];
         }
-    } catch (e) { /* silent */ }
+    } catch (e) {
+        if (seq !== calRequestSeq) return;
+        calRuns = [];
+        throw e;
+    }
 }
 
 async function openCalendar() {
@@ -1952,29 +1960,33 @@ async function openCalendar() {
         renderCalendar();
     } catch (e) {
         loading.classList.add('hidden');
+        content.classList.add('hidden');
         status.textContent = 'Не удалось загрузить данные';
         status.className = 'profile-status error';
         status.classList.remove('hidden');
     }
 }
 
-function getMonthStart() {
-    return new Date(calYear, calMonth, 1).toISOString();
+function getMonthStart(year, month) {
+    return getCalendarMonthStart(year, month);
 }
 
-function getMonthEnd() {
-    return new Date(calYear, calMonth + 1, 0, 23, 59, 59).toISOString();
+function getMonthEnd(year, month) {
+    return getCalendarMonthEnd(year, month);
 }
 
 function renderCalendar() {
+    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+    if (calSelectedDate && calSelectedDate > daysInMonth) calSelectedDate = null;
+
     document.getElementById('cal-month-label').textContent = new Date(calYear, calMonth).toLocaleDateString('ru', { month: 'long', year: 'numeric' });
     const daysContainer = document.getElementById('cal-days');
     daysContainer.innerHTML = '';
-    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
-    const runDays = new Set(calRuns.filter(r => r.status !== 'cancelled').map(r => new Date(r.starts_at).getDate()));
+    const runDayKeys = new Set(calRuns.filter(r => r.status !== 'cancelled').map(r => getRunDayKey(r.starts_at)));
     for (let d = 1; d <= daysInMonth; d++) {
         const el = document.createElement('div');
-        el.className = 'cal-day' + (runDays.has(d) ? ' has-run' : '') + (calSelectedDate === d ? ' selected' : '');
+        const dayKey = `${calYear}-${calMonth}-${d}`;
+        el.className = 'cal-day' + (runDayKeys.has(dayKey) ? ' has-run' : '') + (calSelectedDate === d ? ' selected' : '');
         el.textContent = d;
         el.addEventListener('click', () => { calSelectedDate = d; renderCalendar(); renderDayEvents(); });
         daysContainer.appendChild(el);
@@ -1986,7 +1998,7 @@ function renderDayEvents() {
     const container = document.getElementById('cal-events');
     container.innerHTML = '';
     if (!calSelectedDate) { container.innerHTML = '<p class="cal-empty">Выберите день</p>'; return; }
-    const dayRuns = calRuns.filter(r => new Date(r.starts_at).getDate() === calSelectedDate);
+    const dayRuns = calRuns.filter(r => isSameDay(r.starts_at, calYear, calMonth, calSelectedDate));
     if (dayRuns.length === 0) { container.innerHTML = '<p class="cal-empty">Нет пробежек</p>'; return; }
     dayRuns.forEach(run => {
         const div = document.createElement('div');
@@ -2050,7 +2062,7 @@ async function saveRun() {
     }
     const body = {
         title: title,
-        starts_at: new Date(dateVal).toISOString(),
+        starts_at: datetimeLocalToISO(dateVal),
         duration_minutes: parseInt(document.getElementById('run-duration').value) || null,
         notes: document.getElementById('run-notes').value.trim() || null,
         reminder_minutes: document.getElementById('run-reminder').value ? parseInt(document.getElementById('run-reminder').value) : null,
@@ -2090,7 +2102,7 @@ async function saveRun() {
 function openRunForm(editRun) {
     editingRunId = editRun ? editRun.id : null;
     document.getElementById('run-title').value = editRun ? editRun.title : '';
-    document.getElementById('run-date').value = editRun ? new Date(editRun.starts_at).toISOString().slice(0, 16) : '';
+    document.getElementById('run-date').value = editRun ? formatDatetimeLocal(new Date(editRun.starts_at)) : '';
     document.getElementById('run-duration').value = editRun && editRun.duration_minutes ? editRun.duration_minutes : '';
     document.getElementById('run-notes').value = editRun && editRun.notes ? editRun.notes : '';
     document.getElementById('run-reminder').value = editRun && editRun.reminder_minutes != null ? editRun.reminder_minutes : '';

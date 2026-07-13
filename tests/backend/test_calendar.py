@@ -482,13 +482,15 @@ async def test_health_endpoints_public():
 async def test_create_run_rejects_past_date():
     _clear_rate_limit()
     from backend.main import app
+    from datetime import datetime, timedelta, timezone
     init_data = _make_init_data()
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post("/api/calendar/runs", json={
-                "title": "Run", "starts_at": "2020-01-01T09:00:00+03:00",
+                "title": "Run", "starts_at": past,
             }, headers={"X-Telegram-Init-Data": init_data})
         assert resp.status_code == 422
 
