@@ -162,6 +162,8 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 | [`GET /health/ready`](https://authentic-growth-runroute-pr-51.up.railway.app/health/ready) | Проверка: API подключён к PostgreSQL (200/503) |
 | `GET /api/health` | Совместимый liveness alias |
 | `GET /api/me` | Текущий пользователь (требует Telegram initData) |
+| `GET /api/profile` | Получение профиля текущего пользователя |
+| `PUT /api/profile` | Обновление профиля текущего пользователя |
 
 ### Telegram Authentication
 
@@ -202,6 +204,18 @@ ALLOWED_ORIGINS=https://run-route-ten.vercel.app
 }
 ```
 
+**GET /api/profile:**
+
+Возвращает текущего пользователя и его профиль. Если профиль отсутствует — безопасная пустая структура.
+
+**PUT /api/profile:**
+
+Редактируемые поля: `display_name` (≤100), `bio` (≤1000), `city` (≤100), `club_name` (≤150), `avatar_url`, `social_links`.
+
+`social_links` поддерживает ключи: `telegram`, `instagram`, `strava`, `vk`, `website`. Неизвестные ключи отклоняются (422). Пустые строки нормализуются в null.
+
+`is_public` и `user_id` передавать нельзя.
+
 **Ограничение срока жизни initData:**
 
 По умолчанию `TELEGRAM_AUTH_MAX_AGE_SECONDS=86400` (24 часа). Значение настраивается через переменную окружения.
@@ -209,12 +223,15 @@ ALLOWED_ORIGINS=https://run-route-ten.vercel.app
 **Ручная проверка внутри Telegram:**
 
 1. Откройте Mini App через бота
-2. В DevTools (Chrome DevTools Remote Debugging) проверьте Network → `/api/me` → Headers → `X-Telegram-Init-Data`
-3. Ответ должен содержать `user` с `telegram_user_id`
+2. Откройте меню (иконка пользователя в header)
+3. Нажмите «Профиль» — загрузится форма
+4. Заполните и сохраните — профиль сохраняется в `public.profiles`
+5. Повторное открытие показывает сохранённые данные
+6. В Supabase появляется одна запись profiles для текущего user_id
 
 **Запрос из обычного браузера:**
 
-Без Telegram initData запрос `/api/me` вернёт 401. Это ожидаемое поведение — Mini App работает только внутри Telegram.
+Без Telegram initData запрос `/api/me` и `/api/profile` вернут 401. Профиль покажет сообщение «Профиль доступен только внутри Telegram».
 
 ### Миграции
 
@@ -222,9 +239,9 @@ ALLOWED_ORIGINS=https://run-route-ten.vercel.app
 python -m backend.migrate
 ```
 
-- Миграции **не выполняются** автоматически при старте API
+- Миграции выполняются автоматически перед каждым API deployment (pre-deploy command в `railway.api.json`)
 - Повторный запуск пропускает уже применённые файлы
-- Перед применением production-миграции проверьте `DATABASE_URL`
+- Текущие миграции: `001_users_profiles.sql`, `002_secure_schema_migrations.sql`
 - Секреты нельзя передавать в командной строке или коммитить
 
 ### Railway
@@ -250,9 +267,6 @@ python -m backend.migrate
 
 | Variable | Required | Описание |
 |----------|----------|----------|
-
-| Variable | Required | Описание |
-|----------|----------|----------|
 | DATABASE_URL | ✅ | PostgreSQL URL (Supabase) |
 | SUPABASE_URL | ✅ | Supabase project URL |
 | SUPABASE_SECRET_KEY | ✅ | Supabase secret key |
@@ -267,8 +281,8 @@ python -m backend.migrate
 
 ## Ограничения
 
-- Основная клиентская логика находится в `mini-app/app.js` (1600+ строк)
-- Backend и схема БД подготовлены; профильные endpoints и подключение Mini App будут добавлены следующими этапами
-- Профили, подписки, календарь пробежек и социальная карта пока не реализованы
+- Основная клиентская логика находится в `mini-app/app.js`
+- Календарь — заглушка (пункт меню «Скоро»)
+- Подписки, пробежки и социальная карта не реализованы
 - Секреты (токены, ключи) нельзя хранить в клиентском коде
 - Маршруты строятся через публичный Valhalla API (ограничения на количество запросов)

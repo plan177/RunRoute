@@ -1,6 +1,5 @@
 import logging
 from typing import Optional
-from uuid import UUID
 
 from .database import get_db_pool
 
@@ -38,17 +37,3 @@ async def upsert_user(
             photo_url,
         )
     return dict(row)
-
-
-async def get_profile(user_id: UUID) -> Optional[dict]:
-    pool = get_db_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT display_name, bio, city, club_name, avatar_url, social_links, is_public
-            FROM public.profiles
-            WHERE user_id = $1
-            """,
-            user_id,
-        )
-    return dict(row) if row else None

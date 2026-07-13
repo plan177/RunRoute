@@ -21,11 +21,19 @@
                 </svg>
                 <h1>RunRoute</h1>
             </div>
-            <button id="feedback-btn" class="feedback-btn" title="Обратная связь">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                </svg>
-            </button>
+            <div class="menu-wrapper">
+                <button id="menu-btn" class="feedback-btn" title="Меню" aria-label="Меню пользователя">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                        <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                </button>
+                <div id="user-menu" class="user-menu hidden">
+                    <button id="menu-profile" class="menu-item" aria-label="Профиль">Профиль</button>
+                    <button id="menu-calendar" class="menu-item" disabled aria-label="Календарь">Календарь <span class="menu-badge">Скоро</span></button>
+                    <button id="menu-feedback" class="menu-item" aria-label="Обратная связь">Обратная связь</button>
+                </div>
+            </div>
         </header>
 
         <div class="tabs">
@@ -326,6 +334,63 @@
             <div class="modal-actions">
                 <button id="confirm-yes" class="modal-btn primary">Да</button>
                 <button id="confirm-no" class="modal-btn secondary">Нет</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="profile-modal" class="modal-overlay hidden">
+        <div class="modal-card modal-profile">
+            <div id="profile-loading" class="profile-loading">
+                <div class="skeleton skeleton-line"></div>
+                <div class="skeleton skeleton-line short"></div>
+                <div class="skeleton skeleton-line"></div>
+            </div>
+            <div id="profile-form" class="profile-form hidden">
+                <div class="profile-field">
+                    <label for="profile-display-name">Имя</label>
+                    <input type="text" id="profile-display-name" maxlength="100" placeholder="Ваше имя" />
+                </div>
+                <div class="profile-field">
+                    <label for="profile-bio">О себе</label>
+                    <textarea id="profile-bio" maxlength="1000" rows="3" placeholder="Расскажите о себе"></textarea>
+                </div>
+                <div class="profile-field">
+                    <label for="profile-city">Город</label>
+                    <input type="text" id="profile-city" maxlength="100" placeholder="Город" />
+                </div>
+                <div class="profile-field">
+                    <label for="profile-club-name">Клуб</label>
+                    <input type="text" id="profile-club-name" maxlength="150" placeholder="Название клуба" />
+                </div>
+                <div class="profile-field">
+                    <label for="profile-avatar-url">Аватар URL</label>
+                    <input type="url" id="profile-avatar-url" placeholder="https://..." />
+                </div>
+                <div class="profile-field">
+                    <label for="profile-social-telegram">Telegram</label>
+                    <input type="url" id="profile-social-telegram" placeholder="https://t.me/..." />
+                </div>
+                <div class="profile-field">
+                    <label for="profile-social-instagram">Instagram</label>
+                    <input type="url" id="profile-social-instagram" placeholder="https://instagram.com/..." />
+                </div>
+                <div class="profile-field">
+                    <label for="profile-social-strava">Strava</label>
+                    <input type="url" id="profile-social-strava" placeholder="https://strava.com/..." />
+                </div>
+                <div class="profile-field">
+                    <label for="profile-social-vk">VK</label>
+                    <input type="url" id="profile-social-vk" placeholder="https://vk.com/..." />
+                </div>
+                <div class="profile-field">
+                    <label for="profile-social-website">Website</label>
+                    <input type="url" id="profile-social-website" placeholder="https://..." />
+                </div>
+                <div id="profile-status" class="profile-status hidden"></div>
+                <div class="modal-actions">
+                    <button id="profile-save" class="modal-btn primary">Сохранить</button>
+                    <button id="profile-cancel" class="modal-btn secondary">Закрыть</button>
+                </div>
             </div>
         </div>
     </div>

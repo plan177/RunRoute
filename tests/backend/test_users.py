@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
-from backend.users import upsert_user, get_profile
+from backend.users import upsert_user
+from backend.profiles import get_profile
 
 
 @pytest.mark.asyncio
@@ -114,7 +115,7 @@ async def test_get_profile_returns_dict():
     mock_pool = AsyncMock()
     mock_pool.acquire = MagicMock(return_value=MagicMock(__aenter__=AsyncMock(return_value=mock_conn), __aexit__=AsyncMock(return_value=False)))
 
-    with patch("backend.users.get_db_pool", return_value=mock_pool):
+    with patch("backend.profiles.get_db_pool", return_value=mock_pool):
         result = await get_profile("00000000-0000-0000-0000-000000000001")
 
     assert result is not None
@@ -128,7 +129,8 @@ async def test_get_profile_returns_none_when_missing():
     mock_pool = AsyncMock()
     mock_pool.acquire = MagicMock(return_value=MagicMock(__aenter__=AsyncMock(return_value=mock_conn), __aexit__=AsyncMock(return_value=False)))
 
-    with patch("backend.users.get_db_pool", return_value=mock_pool):
+    with patch("backend.profiles.get_db_pool", return_value=mock_pool):
         result = await get_profile("00000000-0000-0000-0000-000000000099")
 
-    assert result is None
+    assert result["display_name"] is None
+    assert result["social_links"] == {}
