@@ -180,6 +180,7 @@ class SavedRouteCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v):
+        v = v.strip()
         if not (1 <= len(v) <= 100):
             raise ValueError("name must be 1-100 characters")
         return v

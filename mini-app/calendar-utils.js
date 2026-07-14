@@ -128,6 +128,19 @@
         return `/api/routes/${routeId}`;
     }
 
+    function buildCurrentRouteFromApi(apiRoute, makeGPXFn) {
+        const points = apiRoute.points.map(p => ({ ...p }));
+        return {
+            source: 'saved',
+            saved_route_id: apiRoute.id,
+            route_mode: apiRoute.route_mode,
+            name: apiRoute.name,
+            points,
+            distance_km: apiRoute.distance_m / 1000,
+            gpx: makeGPXFn(points, apiRoute.name),
+        };
+    }
+
     return {
         getMonthStart,
         getMonthEnd,
@@ -146,6 +159,7 @@
         dedupRoutesById,
         buildRouteDetailUrl,
         buildRouteUpdateUrl,
-        buildRouteDeleteUrl
+        buildRouteDeleteUrl,
+        buildCurrentRouteFromApi
     };
 });

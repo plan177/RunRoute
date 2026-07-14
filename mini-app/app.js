@@ -1234,11 +1234,18 @@ async function generateManualRoute() {
 function showRouteButtons(mode) {
     document.getElementById('route-info').classList.remove('hidden');
     document.getElementById('share-btn').classList.remove('hidden');
-    document.getElementById('save-route-btn').classList.remove('hidden');
-    if (mode === 'track') {
+    if (mode === 'saved') {
         document.getElementById('regenerate-btn').classList.add('hidden');
+        document.getElementById('save-route-btn').classList.add('hidden');
+        document.getElementById('generate-btn').classList.add('hidden');
+    } else if (mode === 'track') {
+        document.getElementById('regenerate-btn').classList.add('hidden');
+        document.getElementById('save-route-btn').classList.remove('hidden');
+        document.getElementById('generate-btn').classList.add('hidden');
     } else {
         document.getElementById('regenerate-btn').classList.remove('hidden');
+        document.getElementById('save-route-btn').classList.remove('hidden');
+        document.getElementById('generate-btn').classList.remove('hidden');
     }
 }
 
@@ -1941,6 +1948,7 @@ const {
     buildRouteDetailUrl,
     buildRouteUpdateUrl,
     buildRouteDeleteUrl,
+    buildCurrentRouteFromApi,
 } = window.RunRouteCalendarUtils;
 
 let calYear, calMonth, calSelectedDate, calRuns = [], calRoutes = [];
@@ -2353,25 +2361,9 @@ async function openSavedRoute(routeId) {
 
         document.getElementById('calendar-modal').classList.add('hidden');
 
-        const pts = route.points.map(p => ({ lat: p.lat, lng: p.lng }));
-        currentRoute = { points: pts, distance_km: route.distance_m / 1000 };
-
-        if (routeLayer) map.removeLayer(routeLayer);
-        routeLayer = L.polyline(pts.map(p => [p.lat, p.lng]), {
-            color: '#39FF14', weight: 4, opacity: 0.85,
-        }).addTo(map);
-        map.fitBounds(routeLayer.getBounds(), { padding: [30, 30] });
-
-        document.getElementById('route-distance').textContent = currentRoute.distance_km.toFixed(1) + ' км';
-        document.getElementById('route-info').classList.remove('hidden');
-        document.getElementById('generate-btn').classList.add('hidden');
-        document.getElementById('regenerate-btn').classList.add('hidden');
-        document.getElementById('share-btn').classList.remove('hidden');
-        document.getElementById('save-route-btn').classList.add('hidden');
-
-        routeMode = 'auto';
-        document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'auto'));
-        updateUIForMode();
+        currentRoute = buildCurrentRouteFromApi(route, makeGPX);
+        displayRoute(currentRoute);
+        showRouteButtons('saved');
     } catch (e) {
         showToast('Не удалось загрузить маршрут');
     }
@@ -2454,8 +2446,12 @@ async function deleteSavedRoute(routeId, routeName) {
             calRoutes = calRoutes.filter(r => r.id !== routeId);
             renderSavedRoutes();
             showToast('Маршрут удалён');
+        } else {
+            showToast('Не удалось удалить маршрут');
         }
-    } catch (e) { /* silent */ }
+    } catch (e) {
+        showToast('Ошибка сети');
+    }
 }
 
 function planRunWithRoute(routeId) {

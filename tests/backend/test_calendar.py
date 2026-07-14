@@ -159,6 +159,44 @@ async def test_create_route_too_many_points():
 
 
 @pytest.mark.asyncio
+async def test_create_route_whitespace_name_rejected():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/api/routes", json={
+                "name": "   ", "route_mode": "auto", "distance_m": 5000,
+                "points": [{"lat": 55.7, "lng": 37.6}, {"lat": 55.8, "lng": 37.7}],
+            }, headers={"X-Telegram-Init-Data": init_data})
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_route_name_trimmed():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.create_saved_route", new_callable=lambda: AsyncMock(return_value={
+             "id": "test-id", "name": "Trimmed", "route_mode": "auto",
+             "distance_m": 5000, "points": [], "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z",
+         })) as mock_create:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post("/api/routes", json={
+                "name": "  Trimmed  ", "route_mode": "auto", "distance_m": 5000,
+                "points": [{"lat": 55.7, "lng": 37.6}, {"lat": 55.8, "lng": 37.7}],
+            }, headers={"X-Telegram-Init-Data": init_data})
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs["name"] == "Trimmed"
+
+
+@pytest.mark.asyncio
 async def test_create_route_invalid_coordinates():
     _clear_rate_limit()
     from backend.main import app
