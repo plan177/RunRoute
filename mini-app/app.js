@@ -154,17 +154,7 @@ function initRouteMode() {
             });
         }
 
-        if (plan.offerShareBeforeClear && nextMode === 'track') {
-            const result = await showConfirmModal(
-                'Поделиться текущим маршрутом перед переходом в режим следования?',
-                { yesText: 'Поделиться', middle: 'Продолжить без отправки', noText: 'Отмена' }
-            );
-            if (result === 'no') return;
-            if (result === 'yes') {
-                const shareResult = await shareRoute();
-                if (shareResult === 'cancelled' || shareResult === 'failed') return;
-            }
-        } else if (plan.offerShareBeforeClear) {
+        if (plan.offerShareBeforeClear) {
             const result = await showConfirmModal('Маршрут будет удалён. Поделиться перед удалением?');
             if (result === 'yes') {
                 const shareResult = await shareRoute();
@@ -1945,8 +1935,30 @@ function initCalendar() {
     calYear = now.getFullYear();
     calMonth = now.getMonth();
 
-    document.getElementById('cal-prev').addEventListener('click', async () => { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } await loadCalendarData(); renderCalendar(); });
-    document.getElementById('cal-next').addEventListener('click', async () => { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } await loadCalendarData(); renderCalendar(); });
+    document.getElementById('cal-prev').addEventListener('click', async () => {
+        calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; }
+        try { await loadCalendarData(); } catch (e) {
+            calRuns = [];
+            const status = document.getElementById('calendar-status');
+            const messages = { auth: 'Не удалось подтвердить авторизацию Telegram', not_found: 'Календарь ещё не доступен на сервере', server: 'Сервис календаря временно недоступен', network: 'Не удалось подключиться к серверу' };
+            status.textContent = messages[e.message] || 'Не удалось загрузить данные';
+            status.className = 'profile-status error';
+            status.classList.remove('hidden');
+        }
+        renderCalendar();
+    });
+    document.getElementById('cal-next').addEventListener('click', async () => {
+        calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; }
+        try { await loadCalendarData(); } catch (e) {
+            calRuns = [];
+            const status = document.getElementById('calendar-status');
+            const messages = { auth: 'Не удалось подтвердить авторизацию Telegram', not_found: 'Календарь ещё не доступен на сервере', server: 'Сервис календаря временно недоступен', network: 'Не удалось подключиться к серверу' };
+            status.textContent = messages[e.message] || 'Не удалось загрузить данные';
+            status.className = 'profile-status error';
+            status.classList.remove('hidden');
+        }
+        renderCalendar();
+    });
     document.getElementById('cal-add-run').addEventListener('click', openRunForm);
     document.getElementById('calendar-close').addEventListener('click', () => document.getElementById('calendar-modal').classList.add('hidden'));
     document.getElementById('calendar-modal').addEventListener('click', e => { if (e.target.id === 'calendar-modal') e.target.classList.add('hidden'); });
@@ -1966,7 +1978,15 @@ async function loadCalendarData() {
             fetch(apiUrl('/api/routes'), { headers: getApiHeaders() }),
         ]);
         if (seq !== calRequestSeq) return;
-        if (!runsResp.ok) throw new Error('Failed to load runs');
+
+        if (!runsResp.ok) {
+            calRuns = [];
+            if (runsResp.status === 401) throw new Error('auth');
+            if (runsResp.status === 404) throw new Error('not_found');
+            if (runsResp.status >= 500) throw new Error('server');
+            throw new Error('unknown');
+        }
+
         const runsData = await runsResp.json();
         calRuns = runsData.runs || [];
         if (routesResp.ok) {
@@ -1976,7 +1996,10 @@ async function loadCalendarData() {
     } catch (e) {
         if (seq !== calRequestSeq) return;
         calRuns = [];
-        throw e;
+        if (e.message === 'auth' || e.message === 'not_found' || e.message === 'server' || e.message === 'unknown') {
+            throw e;
+        }
+        throw new Error('network');
     }
 }
 
@@ -2009,7 +2032,13 @@ async function openCalendar() {
     } catch (e) {
         loading.classList.add('hidden');
         content.classList.add('hidden');
-        status.textContent = 'Не удалось загрузить данные';
+        const messages = {
+            auth: 'Не удалось подтвердить авторизацию Telegram',
+            not_found: 'Календарь ещё не доступен на сервере',
+            server: 'Сервис календаря временно недоступен',
+            network: 'Не удалось подключиться к серверу',
+        };
+        status.textContent = messages[e.message] || 'Не удалось загрузить данные';
         status.className = 'profile-status error';
         status.classList.remove('hidden');
     }
