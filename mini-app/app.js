@@ -1883,6 +1883,8 @@ function initSaveRoute() {
                 body: JSON.stringify(payload),
             });
             if (resp.ok) {
+                const saved = await resp.json();
+                calRoutes.unshift(saved);
                 modal.classList.add('hidden');
                 showToast('Маршрут сохранён');
             } else {
@@ -2193,17 +2195,16 @@ function openRunForm(editRun) {
 async function editRun(run) { openRunForm(run); }
 
 async function cancelRun(run) {
-    if (!confirm('Отменить пробежку «' + run.title + '»?')) return;
+    const result = await showConfirmModal('Отменить пробежку «' + run.title + '»?');
+    if (result !== 'yes') return;
     try {
         const resp = await fetch(apiUrl(`/api/calendar/runs/${run.id}/cancel`), {
             method: 'POST', headers: getApiHeaders(),
         });
         if (resp.ok) {
             showToast('Пробежка отменена');
-            const from = calGetMonthStart(calYear, calMonth);
-            const to = calGetMonthEnd(calYear, calMonth);
-            const runsResp = await fetch(apiUrl(`/api/calendar/runs?from=${from}&to=${to}`), { headers: getApiHeaders() });
-            if (runsResp.ok) { calRuns = (await runsResp.json()).runs || []; renderCalendar(); }
+            await loadCalendarData();
+            renderCalendar();
         }
     } catch (e) { /* silent */ }
 }
