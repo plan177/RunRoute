@@ -52,7 +52,7 @@
         }
 
         const shouldStopTracking = trackingActive && previousMode === 'track' && nextMode !== 'track';
-        const shouldOfferShare = hasGeneratedRoute && previousMode !== 'track';
+        const shouldOfferShare = hasGeneratedRoute;
         const shouldClearGeneratedRoute = hasGeneratedRoute;
         const shouldClearManualMode = previousMode === 'manual' && nextMode !== 'manual';
         const shouldRemoveStartMarker = nextMode === 'manual';

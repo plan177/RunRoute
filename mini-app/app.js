@@ -161,12 +161,14 @@ function initRouteMode() {
             );
             if (result === 'no') return;
             if (result === 'yes') {
-                await shareRoute();
+                const shareResult = await shareRoute();
+                if (shareResult === 'cancelled' || shareResult === 'failed') return;
             }
         } else if (plan.offerShareBeforeClear) {
             const result = await showConfirmModal('Маршрут будет удалён. Поделиться перед удалением?');
             if (result === 'yes') {
-                await shareRoute();
+                const shareResult = await shareRoute();
+                if (shareResult === 'cancelled' || shareResult === 'failed') return;
             }
         }
 
@@ -1392,7 +1394,7 @@ function initShare() {
 }
 
 async function shareRoute() {
-    if (!currentRoute || !currentRoute.gpx) return;
+    if (!currentRoute || !currentRoute.gpx) return 'failed';
 
     const dist = currentRoute.distance_km.toFixed(1);
     const fileName = 'route_' + dist + 'km.gpx';
@@ -1406,15 +1408,19 @@ async function shareRoute() {
                 text: '🏃 Маршрут ' + dist + ' км построен в @run_route_bot'
             });
             showToast('Маршрут отправлен');
+            return 'shared';
         } catch (e) {
-            if (e.name !== 'AbortError') {
-                downloadGPX();
-                showToast('GPX скачан');
+            if (e.name === 'AbortError') {
+                return 'cancelled';
             }
+            downloadGPX();
+            showToast('GPX скачан');
+            return 'downloaded';
         }
     } else {
         downloadGPX();
         showToast('GPX скачан');
+        return 'downloaded';
     }
 }
 
@@ -1921,6 +1927,15 @@ function openSaveRouteModal() {
 
 // === Calendar ===
 
+const {
+    getMonthStart: calGetMonthStart,
+    getMonthEnd: calGetMonthEnd,
+    formatDatetimeLocal,
+    datetimeLocalToISO,
+    isSameDay,
+    getRunDayKey,
+} = window.RunRouteCalendarUtils;
+
 let calYear, calMonth, calSelectedDate, calRuns = [], calRoutes = [];
 let editingRunId = null;
 let calRequestSeq = 0;
@@ -1943,8 +1958,8 @@ function initCalendar() {
 
 async function loadCalendarData() {
     const seq = ++calRequestSeq;
-    const from = getMonthStart(calYear, calMonth);
-    const to = getMonthEnd(calYear, calMonth);
+    const from = calGetMonthStart(calYear, calMonth);
+    const to = calGetMonthEnd(calYear, calMonth);
     try {
         const [runsResp, routesResp] = await Promise.all([
             fetch(apiUrl(`/api/calendar/runs?from=${from}&to=${to}`), { headers: getApiHeaders() }),
@@ -1998,14 +2013,6 @@ async function openCalendar() {
         status.className = 'profile-status error';
         status.classList.remove('hidden');
     }
-}
-
-function getMonthStart(year, month) {
-    return getCalendarMonthStart(year, month);
-}
-
-function getMonthEnd(year, month) {
-    return getCalendarMonthEnd(year, month);
 }
 
 function renderCalendar() {
@@ -2164,8 +2171,8 @@ async function cancelRun(run) {
         });
         if (resp.ok) {
             showToast('Пробежка отменена');
-            const from = getMonthStart();
-            const to = getMonthEnd();
+            const from = calGetMonthStart(calYear, calMonth);
+            const to = calGetMonthEnd(calYear, calMonth);
             const runsResp = await fetch(apiUrl(`/api/calendar/runs?from=${from}&to=${to}`), { headers: getApiHeaders() });
             if (runsResp.ok) { calRuns = (await runsResp.json()).runs || []; renderCalendar(); }
         }

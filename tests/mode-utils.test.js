@@ -156,7 +156,7 @@ describe('getModeTransitionPlan', () => {
         });
         assert.equal(plan.valid, true);
         assert.equal(plan.modeChanged, true);
-        assert.equal(plan.offerShareBeforeClear, false);
+        assert.equal(plan.offerShareBeforeClear, true);
         assert.equal(plan.clearGeneratedRoute, true);
     });
 
@@ -171,7 +171,7 @@ describe('getModeTransitionPlan', () => {
         });
         assert.equal(plan.valid, true);
         assert.equal(plan.modeChanged, true);
-        assert.equal(plan.offerShareBeforeClear, false);
+        assert.equal(plan.offerShareBeforeClear, true);
         assert.equal(plan.clearGeneratedRoute, true);
         assert.equal(plan.removeStartMarker, true);
     });
@@ -333,7 +333,7 @@ describe('инварианты', () => {
         }
     });
 
-    it('переход track → auto/manual не предлагает share', () => {
+    it('переход track → auto/manual с маршрутом предлагает share', () => {
         const inputs = [
             { previousMode: 'track', nextMode: 'auto' },
             { previousMode: 'track', nextMode: 'manual' }
@@ -346,8 +346,10 @@ describe('инварианты', () => {
                 hasUserLocation: false,
                 manualPointCount: 0
             });
-            assert.equal(plan.offerShareBeforeClear, false,
-                `offerShareBeforeClear=false для ${input.previousMode} → ${input.nextMode}`);
+            assert.equal(plan.offerShareBeforeClear, true,
+                `offerShareBeforeClear=true для ${input.previousMode} → ${input.nextMode}`);
+            assert.equal(plan.clearGeneratedRoute, true,
+                `clearGeneratedRoute=true для ${input.previousMode} → ${input.nextMode}`);
         }
     });
 
@@ -414,7 +416,7 @@ describe('инварианты', () => {
         assert.equal(plan.clearGeneratedRoute, false);
     });
 
-    it('track → auto после остановки с маршрутом: no share (offer only when leaving non-track)', () => {
+    it('track → auto после остановки с маршрутом: offer share', () => {
         const plan = getModeTransitionPlan({
             previousMode: 'track',
             nextMode: 'auto',
@@ -424,7 +426,7 @@ describe('инварианты', () => {
             manualPointCount: 0
         });
         assert.equal(plan.valid, true);
-        assert.equal(plan.offerShareBeforeClear, false);
+        assert.equal(plan.offerShareBeforeClear, true);
         assert.equal(plan.clearGeneratedRoute, true);
     });
 });
@@ -461,23 +463,23 @@ describe('Share/Track transition', () => {
         assert.equal(plan.clearGeneratedRoute, false);
     });
 
-    it('track -> auto: no offer (track does not offer share), but clear route', () => {
+    it('track -> auto: offer share, clear route', () => {
         const plan = getModeTransitionPlan({
             previousMode: 'track', nextMode: 'auto',
             trackingActive: false, hasGeneratedRoute: true,
             hasUserLocation: false, manualPointCount: 0
         });
-        assert.equal(plan.offerShareBeforeClear, false);
+        assert.equal(plan.offerShareBeforeClear, true);
         assert.equal(plan.clearGeneratedRoute, true);
     });
 
-    it('track -> manual: no offer, but clear route and remove start marker', () => {
+    it('track -> manual: offer share, clear route and remove start marker', () => {
         const plan = getModeTransitionPlan({
             previousMode: 'track', nextMode: 'manual',
             trackingActive: false, hasGeneratedRoute: true,
             hasUserLocation: false, manualPointCount: 0
         });
-        assert.equal(plan.offerShareBeforeClear, false);
+        assert.equal(plan.offerShareBeforeClear, true);
         assert.equal(plan.clearGeneratedRoute, true);
         assert.equal(plan.removeStartMarker, true);
     });
@@ -492,13 +494,13 @@ describe('Share/Track transition', () => {
         assert.equal(plan.clearGeneratedRoute, true);
     });
 
-    it('track → auto после остановки: clear but no share offer', () => {
+    it('track → auto после остановки: offer share, clear route', () => {
         const plan = getModeTransitionPlan({
             previousMode: 'track', nextMode: 'auto',
             trackingActive: false, hasGeneratedRoute: true,
             hasUserLocation: false, manualPointCount: 0
         });
-        assert.equal(plan.offerShareBeforeClear, false);
+        assert.equal(plan.offerShareBeforeClear, true);
         assert.equal(plan.clearGeneratedRoute, true);
     });
 });

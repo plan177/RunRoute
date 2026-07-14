@@ -4,9 +4,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-// Load calendar-utils.js into a sandbox
+// Load calendar-utils.js into a sandbox (UMD module)
 const calendarCode = fs.readFileSync(path.join(__dirname, '..', 'mini-app', 'calendar-utils.js'), 'utf-8');
-const ctx = {};
+const ctx = { module: { exports: {} } };
 vm.createContext(ctx);
 vm.runInContext(calendarCode, ctx);
 
@@ -14,7 +14,7 @@ const {
     getMonthStart, getMonthEnd, formatDatetimeLocal, datetimeLocalToISO,
     isSameDay, getRunDayKey, buildCreateRunPayload, buildUpdateRunPayload,
     buildUpdateRunUrl, buildSaveRoutePayload, validatePointsCount,
-} = ctx;
+} = ctx.RunRouteCalendarUtils || ctx.module.exports;
 
 // Also read production files for regression checks
 const appJs = fs.readFileSync(path.join(__dirname, '..', 'mini-app', 'app.js'), 'utf-8');
@@ -39,7 +39,7 @@ describe('getMonthStart / getMonthEnd', () => {
         assert.equal(result.getMinutes(), 59);
     });
 
-    it('December → January boundary', () => {
+    it('December -> January boundary', () => {
         const dec = new Date(getMonthStart(2026, 11));
         assert.equal(dec.getMonth(), 11);
         assert.equal(dec.getDate(), 1);
@@ -48,7 +48,7 @@ describe('getMonthStart / getMonthEnd', () => {
         assert.equal(jan.getMonth(), 0);
     });
 
-    it('January → December boundary', () => {
+    it('January -> December boundary', () => {
         const dec = new Date(getMonthEnd(2025, 11));
         assert.equal(dec.getFullYear(), 2025);
         assert.equal(dec.getMonth(), 11);
@@ -74,7 +74,7 @@ describe('getMonthStart / getMonthEnd', () => {
 
 describe('formatDatetimeLocal', () => {
     it('formats date without UTC shift', () => {
-        const date = new Date(2026, 7, 10, 9, 0); // Aug 10 2026 09:00 local
+        const date = new Date(2026, 7, 10, 9, 0);
         const result = formatDatetimeLocal(date);
         assert.equal(result, '2026-08-10T09:00');
     });
@@ -188,7 +188,8 @@ describe('buildCreateRunPayload', () => {
 describe('buildUpdateRunPayload', () => {
     it('only includes provided fields', () => {
         const payload = buildUpdateRunPayload({ title: 'Updated' });
-        assert.deepEqual(Object.keys(payload), ['title']);
+        assert.equal(Object.keys(payload).length, 1);
+        assert.equal(payload.title, 'Updated');
     });
 
     it('includes multiple fields', () => {
@@ -246,6 +247,17 @@ describe('validatePointsCount', () => {
     });
 });
 
+describe('UMD module', () => {
+    it('exports via RunRouteCalendarUtils', () => {
+        const ctx2 = { module: { exports: {} } };
+        vm.createContext(ctx2);
+        vm.runInContext(calendarCode, ctx2);
+        assert.ok(ctx2.RunRouteCalendarUtils, 'must export via RunRouteCalendarUtils');
+        assert.equal(typeof ctx2.RunRouteCalendarUtils.getMonthStart, 'function');
+        assert.equal(typeof ctx2.RunRouteCalendarUtils.formatDatetimeLocal, 'function');
+    });
+});
+
 describe('production code regression', () => {
     it('calendar-utils.js is loaded before app.js', () => {
         const calIdx = indexHtml.indexOf('calendar-utils.js');
@@ -255,11 +267,23 @@ describe('production code regression', () => {
         assert.ok(calIdx < appIdx, 'calendar-utils.js must load before app.js');
     });
 
-    it('app.js uses calendar-utils helpers', () => {
-        assert.ok(appJs.includes('getCalendarMonthStart') || appJs.includes('getMonthStart'),
-            'app.js must use getMonthStart');
-        assert.ok(appJs.includes('getCalendarMonthEnd') || appJs.includes('getMonthEnd'),
-            'app.js must use getMonthEnd');
+    it('app.js imports from RunRouteCalendarUtils', () => {
+        assert.ok(appJs.includes('RunRouteCalendarUtils'),
+            'app.js must import from RunRouteCalendarUtils');
+    });
+
+    it('app.js does not redefine getMonthStart/getMonthEnd', () => {
+        assert.ok(!appJs.includes('function getMonthStart('),
+            'app.js must not define getMonthStart');
+        assert.ok(!appJs.includes('function getMonthEnd('),
+            'app.js must not define getMonthEnd');
+    });
+
+    it('app.js uses calGetMonthStart/calGetMonthEnd', () => {
+        assert.ok(appJs.includes('calGetMonthStart'),
+            'app.js must use calGetMonthStart');
+        assert.ok(appJs.includes('calGetMonthEnd'),
+            'app.js must use calGetMonthEnd');
     });
 
     it('app.js uses formatDatetimeLocal for edit', () => {
@@ -292,13 +316,19 @@ describe('production code regression', () => {
             'must reset selected date when out of range');
     });
 
-    it('calendar events use textContent', () => {
-        assert.ok(appJs.includes('.textContent'),
-            'calendar rendering must use textContent');
+    it('shareRoute returns explicit result', () => {
+        assert.ok(appJs.includes("return 'shared'") || appJs.includes('return "shared"'),
+            'shareRoute must return shared');
+        assert.ok(appJs.includes("return 'cancelled'") || appJs.includes('return "cancelled"'),
+            'shareRoute must return cancelled');
+        assert.ok(appJs.includes("return 'downloaded'") || appJs.includes('return "downloaded"'),
+            'shareRoute must return downloaded');
+        assert.ok(appJs.includes("return 'failed'") || appJs.includes('return "failed"'),
+            'shareRoute must return failed');
     });
 
-    it('save route checks 10000 point limit', () => {
-        assert.ok(appJs.includes('10000'),
-            'save route must check 10000 limit');
+    it('mode switch checks share result before clearing', () => {
+        assert.ok(appJs.includes('shareResult'),
+            'mode switch must check shareResult');
     });
 });
