@@ -68,8 +68,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 def _format_reminder_message(run: dict) -> str:
     title = run["title"]
     starts_at = run["starts_at"]
-    if starts_at.tzinfo is None:
-        starts_at = starts_at.replace(tzinfo=timezone.utc)
+    starts_at = starts_at.astimezone(timezone.utc)
     time_str = starts_at.strftime("%d.%m.%Y %H:%M UTC")
 
     lines = [

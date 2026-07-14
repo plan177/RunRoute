@@ -82,12 +82,15 @@ async def recover_stale_processing() -> int:
         # Reset to pending if under max attempts
         recovered = await conn.fetchval(
             """
-            UPDATE public.reminder_deliveries
-            SET status = 'pending'
-            WHERE status = 'processing'
-              AND updated_at < $1
-              AND attempts < $2
-            RETURNING COUNT(*)
+            WITH updated AS (
+                UPDATE public.reminder_deliveries
+                SET status = 'pending'
+                WHERE status = 'processing'
+                  AND updated_at < $1
+                  AND attempts < $2
+                RETURNING 1
+            )
+            SELECT COUNT(*) FROM updated
             """,
             threshold,
             MAX_ATTEMPTS,
@@ -96,12 +99,15 @@ async def recover_stale_processing() -> int:
         # Fail permanently if max attempts reached
         failed = await conn.fetchval(
             """
-            UPDATE public.reminder_deliveries
-            SET status = 'failed', last_error = 'stale_after_restart'
-            WHERE status = 'processing'
-              AND updated_at < $1
-              AND attempts >= $2
-            RETURNING COUNT(*)
+            WITH updated AS (
+                UPDATE public.reminder_deliveries
+                SET status = 'failed', last_error = 'stale_after_restart'
+                WHERE status = 'processing'
+                  AND updated_at < $1
+                  AND attempts >= $2
+                RETURNING 1
+            )
+            SELECT COUNT(*) FROM updated
             """,
             threshold,
             MAX_ATTEMPTS,
