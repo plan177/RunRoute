@@ -210,6 +210,20 @@ class SavedRouteCreate(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class SavedRouteRename(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v):
+        v = v.strip()
+        if not (1 <= len(v) <= 100):
+            raise ValueError("name must be 1-100 characters")
+        return v
+
+    model_config = {"extra": "forbid"}
+
+
 # --- Planned runs ---
 
 ALLOWED_REMINDER_MINUTES = {0, 15, 30, 60, 180, 1440}

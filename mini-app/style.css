@@ -1490,6 +1490,89 @@ body {
     padding: 20px;
 }
 
+/* Calendar tabs */
+.cal-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--glass-border);
+    margin-bottom: 12px;
+}
+
+.cal-tab {
+    flex: 1;
+    padding: 10px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.cal-tab.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+/* Route cards */
+.cal-route-card {
+    padding: 12px;
+    background: var(--glass);
+    border-radius: var(--radius-xs);
+    margin-bottom: 8px;
+    border-left: 3px solid var(--accent);
+}
+
+.cal-route-name {
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cal-route-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+}
+
+.cal-route-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.cal-route-actions button {
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--glass-border);
+    background: none;
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.cal-route-actions button:hover {
+    background: var(--glass);
+}
+
+.cal-route-actions .route-action-danger {
+    color: var(--danger);
+    border-color: var(--danger);
+}
+
+.cal-route-actions .route-action-primary {
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
 .profile-field select {
     width: 100%;
     padding: 10px 12px;

@@ -1884,7 +1884,15 @@ function initSaveRoute() {
             });
             if (resp.ok) {
                 const saved = await resp.json();
-                calRoutes.unshift(saved);
+                calRoutes.unshift({
+                    id: saved.id,
+                    name: saved.name,
+                    route_mode: saved.route_mode,
+                    distance_m: saved.distance_m,
+                    created_at: saved.created_at,
+                    updated_at: saved.updated_at,
+                    points_count: saved.points ? saved.points.length : 0,
+                });
                 modal.classList.add('hidden');
                 showToast('Маршрут сохранён');
             } else {
@@ -1926,6 +1934,13 @@ const {
     datetimeLocalToISO,
     isSameDay,
     getRunDayKey,
+    formatRouteMode,
+    formatDistanceM,
+    formatDate,
+    dedupRoutesById,
+    buildRouteDetailUrl,
+    buildRouteUpdateUrl,
+    buildRouteDeleteUrl,
 } = window.RunRouteCalendarUtils;
 
 let calYear, calMonth, calSelectedDate, calRuns = [], calRoutes = [];
@@ -1936,6 +1951,8 @@ function initCalendar() {
     const now = new Date();
     calYear = now.getFullYear();
     calMonth = now.getMonth();
+
+    initCalendarTabs();
 
     document.getElementById('cal-prev').addEventListener('click', async () => {
         calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; }
@@ -2207,6 +2224,253 @@ async function cancelRun(run) {
             renderCalendar();
         }
     } catch (e) { /* silent */ }
+}
+
+// === Saved Routes Management ===
+
+let calActiveTab = 'calendar';
+
+function initCalendarTabs() {
+    document.querySelectorAll('.cal-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const target = tab.dataset.calTab;
+            if (target === calActiveTab) return;
+            calActiveTab = target;
+            document.querySelectorAll('.cal-tab').forEach(t => t.classList.toggle('active', t.dataset.calTab === target));
+            document.getElementById('cal-panel-calendar').classList.toggle('hidden', target !== 'calendar');
+            document.getElementById('cal-panel-routes').classList.toggle('hidden', target !== 'routes');
+            if (target === 'routes') loadSavedRoutes();
+        });
+    });
+}
+
+async function loadSavedRoutes() {
+    const loading = document.getElementById('cal-routes-loading');
+    const list = document.getElementById('cal-routes-list');
+    const empty = document.getElementById('cal-routes-empty');
+    const status = document.getElementById('cal-routes-status');
+
+    loading.classList.remove('hidden');
+    list.innerHTML = '';
+    empty.classList.add('hidden');
+    status.classList.add('hidden');
+
+    try {
+        const resp = await fetch(apiUrl('/api/routes'), { headers: getApiHeaders() });
+        if (!resp.ok) {
+            throw new Error(resp.status >= 500 ? 'server' : 'unknown');
+        }
+        const data = await resp.json();
+        calRoutes = dedupRoutesById(data.routes || []);
+        loading.classList.add('hidden');
+        renderSavedRoutes();
+    } catch (e) {
+        loading.classList.add('hidden');
+        list.innerHTML = '';
+        const messages = { server: 'Сервис временно недоступен', unknown: 'Не удалось загрузить маршруты' };
+        status.textContent = messages[e.message] || 'Не удалось загрузить маршруты';
+        status.className = 'profile-status error';
+        status.classList.remove('hidden');
+    }
+}
+
+function renderSavedRoutes() {
+    const list = document.getElementById('cal-routes-list');
+    const empty = document.getElementById('cal-routes-empty');
+    list.innerHTML = '';
+
+    if (calRoutes.length === 0) {
+        empty.classList.remove('hidden');
+        return;
+    }
+    empty.classList.add('hidden');
+
+    calRoutes.forEach(route => {
+        const card = document.createElement('div');
+        card.className = 'cal-route-card';
+        card.dataset.routeId = route.id;
+
+        const name = document.createElement('div');
+        name.className = 'cal-route-name';
+        name.textContent = route.name;
+        card.appendChild(name);
+
+        const meta = document.createElement('div');
+        meta.className = 'cal-route-meta';
+        const modeSpan = document.createElement('span');
+        modeSpan.textContent = formatRouteMode(route.route_mode);
+        meta.appendChild(modeSpan);
+        const distSpan = document.createElement('span');
+        distSpan.textContent = formatDistanceM(route.distance_m);
+        meta.appendChild(distSpan);
+        const dateSpan = document.createElement('span');
+        dateSpan.textContent = formatDate(route.created_at);
+        meta.appendChild(dateSpan);
+        if (route.points_count != null) {
+            const ptsSpan = document.createElement('span');
+            ptsSpan.textContent = route.points_count + ' точек';
+            meta.appendChild(ptsSpan);
+        }
+        card.appendChild(meta);
+
+        const actions = document.createElement('div');
+        actions.className = 'cal-route-actions';
+
+        const openBtn = document.createElement('button');
+        openBtn.textContent = 'Открыть';
+        openBtn.className = 'route-action-primary';
+        openBtn.addEventListener('click', () => openSavedRoute(route.id));
+        actions.appendChild(openBtn);
+
+        const planBtn = document.createElement('button');
+        planBtn.textContent = 'Запланировать';
+        planBtn.addEventListener('click', () => planRunWithRoute(route.id));
+        actions.appendChild(planBtn);
+
+        const renameBtn = document.createElement('button');
+        renameBtn.textContent = 'Переименовать';
+        renameBtn.addEventListener('click', () => renameSavedRoute(route.id, route.name));
+        actions.appendChild(renameBtn);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = 'Удалить';
+        deleteBtn.className = 'route-action-danger';
+        deleteBtn.addEventListener('click', () => deleteSavedRoute(route.id, route.name));
+        actions.appendChild(deleteBtn);
+
+        card.appendChild(actions);
+        list.appendChild(card);
+    });
+}
+
+async function openSavedRoute(routeId) {
+    if (!isTelegramApp()) return;
+    try {
+        const resp = await fetch(apiUrl(buildRouteDetailUrl(routeId)), { headers: getApiHeaders() });
+        if (!resp.ok) throw new Error('load');
+        const route = await resp.json();
+        if (!route.points || route.points.length < 2) throw new Error('empty');
+
+        document.getElementById('calendar-modal').classList.add('hidden');
+
+        const pts = route.points.map(p => ({ lat: p.lat, lng: p.lng }));
+        currentRoute = { points: pts, distance_km: route.distance_m / 1000 };
+
+        if (routeLayer) map.removeLayer(routeLayer);
+        routeLayer = L.polyline(pts.map(p => [p.lat, p.lng]), {
+            color: '#39FF14', weight: 4, opacity: 0.85,
+        }).addTo(map);
+        map.fitBounds(routeLayer.getBounds(), { padding: [30, 30] });
+
+        document.getElementById('route-distance').textContent = currentRoute.distance_km.toFixed(1) + ' км';
+        document.getElementById('route-info').classList.remove('hidden');
+        document.getElementById('generate-btn').classList.add('hidden');
+        document.getElementById('regenerate-btn').classList.add('hidden');
+        document.getElementById('share-btn').classList.remove('hidden');
+        document.getElementById('save-route-btn').classList.add('hidden');
+
+        routeMode = 'auto';
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'auto'));
+        updateUIForMode();
+    } catch (e) {
+        showToast('Не удалось загрузить маршрут');
+    }
+}
+
+function renameSavedRoute(routeId, currentName) {
+    const modal = document.getElementById('rename-route-modal');
+    const input = document.getElementById('rename-route-name');
+    const status = document.getElementById('rename-route-status');
+    input.value = currentName;
+    status.classList.add('hidden');
+    modal.classList.remove('hidden');
+    input.focus();
+
+    const confirmBtn = document.getElementById('rename-route-confirm');
+    const cancelBtn = document.getElementById('rename-route-cancel');
+
+    function cleanup() {
+        modal.classList.add('hidden');
+        confirmBtn.removeEventListener('click', onConfirm);
+        cancelBtn.removeEventListener('click', onCancel);
+        modal.removeEventListener('click', onOverlay);
+    }
+    function onOverlay(e) { if (e.target === modal) cleanup(); }
+    async function onConfirm() {
+        const newName = input.value.trim();
+        if (!newName || newName.length > 100) {
+            status.textContent = 'Название 1–100 символов';
+            status.className = 'profile-status error';
+            status.classList.remove('hidden');
+            return;
+        }
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Сохранение...';
+        try {
+            const resp = await fetch(apiUrl(buildRouteUpdateUrl(routeId)), {
+                method: 'PUT',
+                headers: getApiHeaders(),
+                body: JSON.stringify({ name: newName }),
+            });
+            if (resp.ok) {
+                const updated = await resp.json();
+                const idx = calRoutes.findIndex(r => r.id === routeId);
+                if (idx >= 0) calRoutes[idx] = { ...calRoutes[idx], name: updated.name };
+                renderSavedRoutes();
+                cleanup();
+                showToast('Маршрут переименован');
+            } else {
+                const data = await resp.json().catch(() => ({}));
+                status.textContent = data.detail || 'Ошибка';
+                status.className = 'profile-status error';
+                status.classList.remove('hidden');
+            }
+        } catch (e) {
+            status.textContent = 'Ошибка сети';
+            status.className = 'profile-status error';
+            status.classList.remove('hidden');
+        } finally {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Сохранить';
+        }
+    }
+    function onCancel() { cleanup(); }
+
+    confirmBtn.addEventListener('click', onConfirm);
+    cancelBtn.addEventListener('click', onCancel);
+    modal.addEventListener('click', onOverlay);
+}
+
+async function deleteSavedRoute(routeId, routeName) {
+    const result = await showConfirmModal(
+        'Удалить маршрут \u00AB' + routeName + '\u00BB?\nЗапланированные пробежки сохранятся, но будут отвязаны от маршрута',
+    );
+    if (result !== 'yes') return;
+    try {
+        const resp = await fetch(apiUrl(buildRouteDeleteUrl(routeId)), {
+            method: 'DELETE', headers: getApiHeaders(),
+        });
+        if (resp.ok) {
+            calRoutes = calRoutes.filter(r => r.id !== routeId);
+            renderSavedRoutes();
+            showToast('Маршрут удалён');
+        }
+    } catch (e) { /* silent */ }
+}
+
+function planRunWithRoute(routeId) {
+    calActiveTab = 'calendar';
+    document.querySelectorAll('.cal-tab').forEach(t => t.classList.toggle('active', t.dataset.calTab === 'calendar'));
+    document.getElementById('cal-panel-calendar').classList.remove('hidden');
+    document.getElementById('cal-panel-routes').classList.add('hidden');
+    openRunForm(null);
+    const select = document.getElementById('run-route-select');
+    for (let i = 0; i < select.options.length; i++) {
+        if (select.options[i].value === routeId) {
+            select.selectedIndex = i;
+            break;
+        }
+    }
 }
 
 // === Init all ===
