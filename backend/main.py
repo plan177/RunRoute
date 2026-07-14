@@ -12,7 +12,12 @@ from .database import init_db_pool, close_db_pool, check_database_connection
 from .auth import get_current_telegram_user
 from .users import upsert_user
 from .profiles import get_profile, upsert_profile
-from .models import ProfileUpdateRequest
+from .models import ProfileUpdateRequest, SavedRouteCreate, PlannedRunCreate, PlannedRunUpdate
+from .routes import create_saved_route, list_saved_routes, get_saved_route, delete_saved_route
+from .calendar import (
+    create_planned_run, list_planned_runs, get_planned_run,
+    update_planned_run, cancel_planned_run,
+)
 import uvicorn
 
 logging.basicConfig(level=logging.INFO)
@@ -168,6 +173,242 @@ async def update_profile_endpoint(
         return {"user": user, "profile": profile}
     except Exception:
         logger.error("Failed to update profile")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# --- Saved routes ---
+
+
+@app.post("/api/routes")
+async def create_route_endpoint(
+    request: SavedRouteCreate,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        points = [p.model_dump() for p in request.points]
+        route = await create_saved_route(
+            user_id=user["id"],
+            name=request.name,
+            route_mode=request.route_mode,
+            distance_m=request.distance_m,
+            points=points,
+        )
+        return route
+    except Exception:
+        logger.error("Failed to save route")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/routes")
+async def list_routes_endpoint(
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        routes = await list_saved_routes(user_id=user["id"])
+        return {"routes": routes}
+    except Exception:
+        logger.error("Failed to list routes")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/routes/{route_id}")
+async def get_route_endpoint(
+    route_id: str,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        route = await get_saved_route(user_id=user["id"], route_id=UUID(route_id))
+        if route is None:
+            raise HTTPException(status_code=404, detail="Route not found")
+        return route
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to get route")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.delete("/api/routes/{route_id}")
+async def delete_route_endpoint(
+    route_id: str,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        deleted = await delete_saved_route(user_id=user["id"], route_id=UUID(route_id))
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Route not found")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to delete route")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# --- Planned runs ---
+
+
+@app.post("/api/calendar/runs")
+async def create_run_endpoint(
+    request: PlannedRunCreate,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        run = await create_planned_run(
+            user_id=user["id"],
+            title=request.title,
+            starts_at=request.starts_at,
+            saved_route_id=request.saved_route_id,
+            duration_minutes=request.duration_minutes,
+            notes=request.notes,
+            reminder_minutes=request.reminder_minutes,
+            notifications_enabled=request.notifications_enabled,
+        )
+        if run is None:
+            raise HTTPException(status_code=404, detail="Saved route not found")
+        return run
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to create planned run")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/calendar/runs")
+async def list_runs_endpoint(
+    from_date: str = Query(..., alias="from"),
+    to_date: str = Query(..., alias="to"),
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from datetime import datetime, timezone
+        from dateutil.parser import isoparse
+
+        from_dt = isoparse(from_date)
+        to_dt = isoparse(to_date)
+
+        if from_dt.tzinfo is None:
+            from_dt = from_dt.replace(tzinfo=timezone.utc)
+        if to_dt.tzinfo is None:
+            to_dt = to_dt.replace(tzinfo=timezone.utc)
+
+        if from_dt >= to_dt:
+            raise HTTPException(status_code=400, detail="'from' must be before 'to'")
+        if (to_dt - from_dt).days > 366:
+            raise HTTPException(status_code=400, detail="Maximum range is 366 days")
+
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        runs = await list_planned_runs(user_id=user["id"], from_dt=from_dt, to_dt=to_dt)
+        return {"runs": runs}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to list planned runs")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.put("/api/calendar/runs/{run_id}")
+async def update_run_endpoint(
+    run_id: str,
+    request: PlannedRunUpdate,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        fields = request.model_dump(exclude_unset=True)
+        run = await update_planned_run(user_id=user["id"], run_id=UUID(run_id), fields=fields)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if run == "route_not_found":
+            raise HTTPException(status_code=404, detail="Saved route not found")
+        return run
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to update planned run")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/api/calendar/runs/{run_id}/cancel")
+async def cancel_run_endpoint(
+    run_id: str,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        run = await cancel_planned_run(user_id=user["id"], run_id=UUID(run_id))
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return run
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to cancel planned run")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

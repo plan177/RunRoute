@@ -125,8 +125,8 @@ describe('getModeTransitionPlan', () => {
         });
         assert.equal(plan.valid, true);
         assert.equal(plan.modeChanged, true);
-        assert.equal(plan.offerShareBeforeClear, false);
-        assert.equal(plan.clearGeneratedRoute, false);
+        assert.equal(plan.offerShareBeforeClear, true);
+        assert.equal(plan.clearGeneratedRoute, true);
     });
 
     it('manual → track с маршрутом', () => {
@@ -140,7 +140,8 @@ describe('getModeTransitionPlan', () => {
         });
         assert.equal(plan.valid, true);
         assert.equal(plan.modeChanged, true);
-        assert.equal(plan.offerShareBeforeClear, false);
+        assert.equal(plan.offerShareBeforeClear, true);
+        assert.equal(plan.clearGeneratedRoute, true);
         assert.equal(plan.clearManualMode, true);
     });
 
@@ -312,7 +313,7 @@ describe('инварианты', () => {
         }
     });
 
-    it('переход в track никогда не предлагает share', () => {
+    it('переход auto/manual → track с маршрутом предлагает share', () => {
         const inputs = [
             { previousMode: 'auto', nextMode: 'track' },
             { previousMode: 'manual', nextMode: 'track' }
@@ -325,8 +326,30 @@ describe('инварианты', () => {
                 hasUserLocation: false,
                 manualPointCount: 0
             });
-            assert.equal(plan.offerShareBeforeClear, false, 
-                `offerShareBeforeClear=false для ${input.previousMode} → ${input.nextMode}`);
+            assert.equal(plan.offerShareBeforeClear, true,
+                `offerShareBeforeClear=true для ${input.previousMode} → ${input.nextMode}`);
+            assert.equal(plan.clearGeneratedRoute, true,
+                `clearGeneratedRoute=true для ${input.previousMode} → ${input.nextMode}`);
+        }
+    });
+
+    it('переход track → auto/manual с маршрутом предлагает share', () => {
+        const inputs = [
+            { previousMode: 'track', nextMode: 'auto' },
+            { previousMode: 'track', nextMode: 'manual' }
+        ];
+        for (const input of inputs) {
+            const plan = getModeTransitionPlan({
+                ...input,
+                trackingActive: false,
+                hasGeneratedRoute: true,
+                hasUserLocation: false,
+                manualPointCount: 0
+            });
+            assert.equal(plan.offerShareBeforeClear, true,
+                `offerShareBeforeClear=true для ${input.previousMode} → ${input.nextMode}`);
+            assert.equal(plan.clearGeneratedRoute, true,
+                `clearGeneratedRoute=true для ${input.previousMode} → ${input.nextMode}`);
         }
     });
 
@@ -350,7 +373,7 @@ describe('инварианты', () => {
         }
     });
 
-    it('manual → track с маршрутом: clearGeneratedRoute=false', () => {
+    it('manual → track с маршрутом: clearGeneratedRoute=true', () => {
         const plan = getModeTransitionPlan({
             previousMode: 'manual',
             nextMode: 'track',
@@ -360,7 +383,7 @@ describe('инварианты', () => {
             manualPointCount: 3
         });
         assert.equal(plan.valid, true);
-        assert.equal(plan.clearGeneratedRoute, false);
+        assert.equal(plan.clearGeneratedRoute, true);
         assert.equal(plan.clearManualMode, true);
     });
 
@@ -393,7 +416,7 @@ describe('инварианты', () => {
         assert.equal(plan.clearGeneratedRoute, false);
     });
 
-    it('track → auto после остановки с маршрутом: share', () => {
+    it('track → auto после остановки с маршрутом: offer share', () => {
         const plan = getModeTransitionPlan({
             previousMode: 'track',
             nextMode: 'auto',
@@ -403,6 +426,80 @@ describe('инварианты', () => {
             manualPointCount: 0
         });
         assert.equal(plan.valid, true);
+        assert.equal(plan.offerShareBeforeClear, true);
+        assert.equal(plan.clearGeneratedRoute, true);
+    });
+});
+
+describe('Share/Track transition', () => {
+    it('auto с маршрутом → track: offerShare=true, clearRoute=true', () => {
+        const plan = getModeTransitionPlan({
+            previousMode: 'auto', nextMode: 'track',
+            trackingActive: false, hasGeneratedRoute: true,
+            hasUserLocation: true, manualPointCount: 0
+        });
+        assert.equal(plan.offerShareBeforeClear, true);
+        assert.equal(plan.clearGeneratedRoute, true);
+    });
+
+    it('manual с маршрутом → track: offerShare=true, clearRoute=true, clearManual=true', () => {
+        const plan = getModeTransitionPlan({
+            previousMode: 'manual', nextMode: 'track',
+            trackingActive: false, hasGeneratedRoute: true,
+            hasUserLocation: true, manualPointCount: 3
+        });
+        assert.equal(plan.offerShareBeforeClear, true);
+        assert.equal(plan.clearGeneratedRoute, true);
+        assert.equal(plan.clearManualMode, true);
+    });
+
+    it('auto без маршрута → track: no offer, no clear', () => {
+        const plan = getModeTransitionPlan({
+            previousMode: 'auto', nextMode: 'track',
+            trackingActive: false, hasGeneratedRoute: false,
+            hasUserLocation: true, manualPointCount: 0
+        });
+        assert.equal(plan.offerShareBeforeClear, false);
+        assert.equal(plan.clearGeneratedRoute, false);
+    });
+
+    it('track -> auto: offer share, clear route', () => {
+        const plan = getModeTransitionPlan({
+            previousMode: 'track', nextMode: 'auto',
+            trackingActive: false, hasGeneratedRoute: true,
+            hasUserLocation: false, manualPointCount: 0
+        });
+        assert.equal(plan.offerShareBeforeClear, true);
+        assert.equal(plan.clearGeneratedRoute, true);
+    });
+
+    it('track -> manual: offer share, clear route and remove start marker', () => {
+        const plan = getModeTransitionPlan({
+            previousMode: 'track', nextMode: 'manual',
+            trackingActive: false, hasGeneratedRoute: true,
+            hasUserLocation: false, manualPointCount: 0
+        });
+        assert.equal(plan.offerShareBeforeClear, true);
+        assert.equal(plan.clearGeneratedRoute, true);
+        assert.equal(plan.removeStartMarker, true);
+    });
+
+    it('auto → manual с маршрутом: offer share (not track transition)', () => {
+        const plan = getModeTransitionPlan({
+            previousMode: 'auto', nextMode: 'manual',
+            trackingActive: false, hasGeneratedRoute: true,
+            hasUserLocation: true, manualPointCount: 0
+        });
+        assert.equal(plan.offerShareBeforeClear, true);
+        assert.equal(plan.clearGeneratedRoute, true);
+    });
+
+    it('track → auto после остановки: offer share, clear route', () => {
+        const plan = getModeTransitionPlan({
+            previousMode: 'track', nextMode: 'auto',
+            trackingActive: false, hasGeneratedRoute: true,
+            hasUserLocation: false, manualPointCount: 0
+        });
         assert.equal(plan.offerShareBeforeClear, true);
         assert.equal(plan.clearGeneratedRoute, true);
     });

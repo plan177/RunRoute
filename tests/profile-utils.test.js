@@ -82,9 +82,11 @@ describe('production code regression', () => {
         assert.ok(appJs.includes('loadCurrentUser()'), 'DOMContentLoaded must call loadCurrentUser');
     });
 
-    it('calendar button is disabled', () => {
-        assert.ok(indexHtml.includes('menu-calendar') && indexHtml.includes('disabled'),
-            'calendar menu item must be disabled');
+    it('calendar button is enabled', () => {
+        assert.ok(indexHtml.includes('menu-calendar'),
+            'calendar menu item must exist');
+        assert.ok(!indexHtml.includes('menu-calendar" class="menu-item" disabled'),
+            'calendar menu item must not be disabled');
     });
 
     it('profile requests use apiUrl', () => {
@@ -98,10 +100,9 @@ describe('production code regression', () => {
     });
 
     it('profile flow uses value/textContent, not innerHTML', () => {
-        const profileSection = appJs.substring(
-            appJs.indexOf('function openProfileModal'),
-            appJs.indexOf('// === Init all')
-        );
+        const profileStart = appJs.indexOf('function openProfileModal');
+        const profileEnd = appJs.indexOf('function initProfile') + appJs.substring(appJs.indexOf('function initProfile')).indexOf('}') + 1;
+        const profileSection = appJs.substring(profileStart, profileEnd);
         assert.ok(!profileSection.includes('.innerHTML'),
             'profile flow must not use innerHTML');
     });
