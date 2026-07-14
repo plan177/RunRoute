@@ -807,3 +807,223 @@ async def test_delete_route_owner_only():
             )
         call_kwargs = mock_delete.call_args[1]
         assert call_kwargs["user_id"] == _mock_user()["id"]
+
+
+# --- Migration 004 tests ---
+
+
+def test_migration_004_creates_reminder_deliveries():
+    sql = open("backend/migrations/004_planned_run_reminders.sql").read()
+    assert "CREATE TABLE IF NOT EXISTS public.reminder_deliveries" in sql
+
+
+def test_migration_004_rls_enabled():
+    sql = open("backend/migrations/004_planned_run_reminders.sql").read()
+    assert "ENABLE ROW LEVEL SECURITY" in sql
+
+
+def test_migration_004_has_unique_index():
+    sql = open("backend/migrations/004_planned_run_reminders.sql").read()
+    assert "idx_reminder_deliveries_run_pending" in sql
+
+
+def test_migration_004_has_status_check():
+    sql = open("backend/migrations/004_planned_run_reminders.sql").read()
+    assert "'pending'" in sql
+    assert "'processing'" in sql
+    assert "'sent'" in sql
+    assert "'failed'" in sql
+
+
+# --- Reminder sync tests ---
+
+
+@pytest.mark.asyncio
+async def test_create_run_creates_reminder():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.create_planned_run", new_callable=lambda: AsyncMock(return_value={
+             "id": "run-1", "title": "Morning Run", "status": "planned",
+             "reminder_minutes": 30, "notifications_enabled": True,
+             "starts_at": "2026-12-01T09:00:00+03:00",
+         })) as mock_create:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/api/calendar/runs", json={
+                "title": "Morning Run",
+                "starts_at": "2026-12-01T09:00:00+03:00",
+                "reminder_minutes": 30,
+            }, headers={"X-Telegram-Init-Data": init_data})
+        assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_create_run_no_reminder_when_zero():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.create_planned_run", new_callable=lambda: AsyncMock(return_value={
+             "id": "run-2", "title": "Run", "status": "planned",
+             "reminder_minutes": 0, "notifications_enabled": True,
+             "starts_at": "2026-12-01T09:00:00+03:00",
+         })):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/api/calendar/runs", json={
+                "title": "Run",
+                "starts_at": "2026-12-01T09:00:00+03:00",
+                "reminder_minutes": 0,
+            }, headers={"X-Telegram-Init-Data": init_data})
+        assert resp.status_code == 200
+
+
+# --- Reminder worker tests ---
+
+
+def test_format_reminder_message():
+    from bot import _format_reminder_message
+    from datetime import datetime, timezone
+
+    run = {
+        "title": "Morning Jog",
+        "starts_at": datetime(2025, 12, 1, 9, 0, 0, tzinfo=timezone.utc),
+        "distance_m": 5000,
+        "route_name": "Park Loop",
+    }
+    msg = _format_reminder_message(run)
+    assert "🏃 Скоро пробежка" in msg
+    assert "Название: Morning Jog" in msg
+    assert "01.12.2025 09:00 UTC" in msg
+    assert "5.0 км" in msg
+    assert "Маршрут: Park Loop" in msg
+
+
+def test_format_reminder_message_no_distance():
+    from bot import _format_reminder_message
+    from datetime import datetime, timezone
+
+    run = {
+        "title": "Quick Run",
+        "starts_at": datetime(2025, 12, 1, 9, 0, 0, tzinfo=timezone.utc),
+    }
+    msg = _format_reminder_message(run)
+    assert "Дистанция" not in msg
+    assert "Маршрут" not in msg
+
+
+def test_format_reminder_message_no_route():
+    from bot import _format_reminder_message
+    from datetime import datetime, timezone
+
+    run = {
+        "title": "Run",
+        "starts_at": datetime(2025, 12, 1, 9, 0, 0, tzinfo=timezone.utc),
+        "distance_m": 3000,
+    }
+    msg = _format_reminder_message(run)
+    assert "3.0 км" in msg
+    assert "Маршрут" not in msg
+
+
+@pytest.mark.asyncio
+async def test_sync_run_reminder_creates_pending():
+    from backend.reminders import sync_run_reminder
+    from datetime import datetime, timezone, timedelta
+    from uuid import uuid4
+
+    mock_conn = AsyncMock()
+    mock_pool = AsyncMock()
+    # asyncpg pool.acquire() returns an async context manager
+    mock_acm = MagicMock()
+    mock_acm.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_acm.__aexit__ = AsyncMock(return_value=False)
+    mock_pool.acquire = MagicMock(return_value=mock_acm)
+
+    with patch("backend.reminders.get_db_pool", return_value=mock_pool):
+        user_id = uuid4()
+        run_id = uuid4()
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        await sync_run_reminder(
+            user_id=user_id,
+            planned_run_id=run_id,
+            starts_at=starts_at,
+            reminder_minutes=30,
+            status="planned",
+            notifications_enabled=True,
+        )
+
+        assert mock_conn.execute.call_count == 2
+        delete_call = mock_conn.execute.call_args_list[0]
+        assert "DELETE" in delete_call[0][0]
+        insert_call = mock_conn.execute.call_args_list[1]
+        assert "INSERT" in insert_call[0][0]
+
+
+@pytest.mark.asyncio
+async def test_sync_run_reminder_no_create_when_cancelled():
+    from backend.reminders import sync_run_reminder
+    from datetime import datetime, timezone, timedelta
+    from uuid import uuid4
+
+    mock_conn = AsyncMock()
+    mock_pool = AsyncMock()
+    mock_acm = MagicMock()
+    mock_acm.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_acm.__aexit__ = AsyncMock(return_value=False)
+    mock_pool.acquire = MagicMock(return_value=mock_acm)
+
+    with patch("backend.reminders.get_db_pool", return_value=mock_pool):
+        user_id = uuid4()
+        run_id = uuid4()
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        await sync_run_reminder(
+            user_id=user_id,
+            planned_run_id=run_id,
+            starts_at=starts_at,
+            reminder_minutes=30,
+            status="cancelled",
+            notifications_enabled=False,
+        )
+
+        assert mock_conn.execute.call_count == 1
+        delete_call = mock_conn.execute.call_args_list[0]
+        assert "DELETE" in delete_call[0][0]
+
+
+@pytest.mark.asyncio
+async def test_sync_run_reminder_no_create_for_past():
+    from backend.reminders import sync_run_reminder
+    from datetime import datetime, timezone, timedelta
+    from uuid import uuid4
+
+    mock_conn = AsyncMock()
+    mock_pool = AsyncMock()
+    mock_acm = MagicMock()
+    mock_acm.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_acm.__aexit__ = AsyncMock(return_value=False)
+    mock_pool.acquire = MagicMock(return_value=mock_acm)
+
+    with patch("backend.reminders.get_db_pool", return_value=mock_pool):
+        user_id = uuid4()
+        run_id = uuid4()
+        starts_at = datetime.now(timezone.utc) - timedelta(hours=1)
+
+        await sync_run_reminder(
+            user_id=user_id,
+            planned_run_id=run_id,
+            starts_at=starts_at,
+            reminder_minutes=30,
+            status="planned",
+            notifications_enabled=True,
+        )
+
+        assert mock_conn.execute.call_count == 1

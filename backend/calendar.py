@@ -4,6 +4,7 @@ from typing import Optional
 from uuid import UUID
 
 from .database import get_db_pool
+from .reminders import sync_run_reminder
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,16 @@ async def create_planned_run(
             reminder_minutes,
             notifications_enabled,
         )
-    return dict(row)
+    run = dict(row)
+    await sync_run_reminder(
+        user_id=user_id,
+        planned_run_id=run["id"],
+        starts_at=starts_at,
+        reminder_minutes=reminder_minutes,
+        status=run["status"],
+        notifications_enabled=notifications_enabled,
+    )
+    return run
 
 
 async def list_planned_runs(
@@ -127,7 +137,20 @@ async def update_planned_run(
                       reminder_minutes, notifications_enabled, status, created_at, updated_at
         """
         row = await conn.fetchrow(sql, *params)
-    return dict(row) if row else None
+
+    run = dict(row)
+    # Reschedule reminder if relevant fields changed
+    reminder_keys = {"starts_at", "reminder_minutes", "status", "notifications_enabled"}
+    if reminder_keys & set(fields.keys()):
+        await sync_run_reminder(
+            user_id=user_id,
+            planned_run_id=run["id"],
+            starts_at=run["starts_at"],
+            reminder_minutes=run["reminder_minutes"],
+            status=run["status"],
+            notifications_enabled=run["notifications_enabled"],
+        )
+    return run
 
 
 async def cancel_planned_run(user_id: UUID, run_id: UUID) -> Optional[dict]:
@@ -143,4 +166,14 @@ async def cancel_planned_run(user_id: UUID, run_id: UUID) -> Optional[dict]:
             run_id,
             user_id,
         )
-    return dict(row) if row else None
+    run = dict(row) if row else None
+    if run:
+        await sync_run_reminder(
+            user_id=user_id,
+            planned_run_id=run["id"],
+            starts_at=run["starts_at"],
+            reminder_minutes=None,
+            status="cancelled",
+            notifications_enabled=False,
+        )
+    return run
