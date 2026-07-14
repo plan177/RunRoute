@@ -45,6 +45,8 @@ body {
     padding: 12px 0 16px;
     animation: fadeInDown 0.5s ease;
     position: relative;
+    z-index: 1000;
+    overflow: visible;
 }
 
 .feedback-btn {
@@ -1239,18 +1241,20 @@ body {
     right: max(12px, env(safe-area-inset-right));
     top: 50%;
     transform: translateY(-50%);
+    z-index: 1001;
 }
 
 .user-menu {
     position: absolute;
-    top: 100%;
+    top: calc(100% + 8px);
     right: 0;
     min-width: 180px;
+    max-width: calc(100vw - 24px);
     background: var(--elevated);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-sm);
     box-shadow: var(--shadow);
-    z-index: 200;
+    z-index: 1002;
     overflow: hidden;
 }
 
