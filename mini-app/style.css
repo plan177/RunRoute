@@ -45,6 +45,8 @@ body {
     padding: 12px 0 16px;
     animation: fadeInDown 0.5s ease;
     position: relative;
+    z-index: 150;
+    background: var(--bg);
 }
 
 .feedback-btn {
