@@ -159,6 +159,44 @@ async def test_create_route_too_many_points():
 
 
 @pytest.mark.asyncio
+async def test_create_route_whitespace_name_rejected():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/api/routes", json={
+                "name": "   ", "route_mode": "auto", "distance_m": 5000,
+                "points": [{"lat": 55.7, "lng": 37.6}, {"lat": 55.8, "lng": 37.7}],
+            }, headers={"X-Telegram-Init-Data": init_data})
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_route_name_trimmed():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.create_saved_route", new_callable=lambda: AsyncMock(return_value={
+             "id": "test-id", "name": "Trimmed", "route_mode": "auto",
+             "distance_m": 5000, "points": [], "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z",
+         })) as mock_create:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post("/api/routes", json={
+                "name": "  Trimmed  ", "route_mode": "auto", "distance_m": 5000,
+                "points": [{"lat": 55.7, "lng": 37.6}, {"lat": 55.8, "lng": 37.7}],
+            }, headers={"X-Telegram-Init-Data": init_data})
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs["name"] == "Trimmed"
+
+
+@pytest.mark.asyncio
 async def test_create_route_invalid_coordinates():
     _clear_rate_limit()
     from backend.main import app
@@ -570,3 +608,202 @@ async def test_update_run_only_sends_provided_fields():
         assert "title" in call_kwargs["fields"]
         assert "duration_minutes" not in call_kwargs["fields"]
         assert "notes" not in call_kwargs["fields"]
+
+
+# --- Route summary (no points) tests ---
+
+
+@pytest.mark.asyncio
+async def test_list_routes_no_points_in_summary():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.list_saved_routes", new_callable=lambda: AsyncMock(return_value=[
+             {"id": "r1", "name": "Test", "route_mode": "auto", "distance_m": 5000,
+              "points_count": 120, "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z"},
+         ])):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/routes", headers={"X-Telegram-Init-Data": init_data})
+        assert resp.status_code == 200
+        route = resp.json()["routes"][0]
+        assert "points" not in route
+        assert route["points_count"] == 120
+
+
+@pytest.mark.asyncio
+async def test_get_route_detail_has_points():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.get_saved_route", new_callable=lambda: AsyncMock(return_value={
+             "id": "r1", "name": "Test", "route_mode": "auto", "distance_m": 5000,
+             "points": [{"lat": 55.7, "lng": 37.6}, {"lat": 55.8, "lng": 37.7}],
+             "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z",
+         })):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/routes/00000000-0000-0000-0000-000000000001",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+        assert "points" in resp.json()
+        assert len(resp.json()["points"]) == 2
+
+
+# --- PUT rename route tests ---
+
+
+@pytest.mark.asyncio
+async def test_rename_route_no_init_data():
+    _clear_rate_limit()
+    from backend.main import app
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.put(
+            "/api/routes/00000000-0000-0000-0000-000000000001",
+            json={"name": "New Name"},
+        )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_rename_route_success():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.rename_saved_route", new_callable=lambda: AsyncMock(return_value={
+             "id": "r1", "name": "Renamed", "route_mode": "auto", "distance_m": 5000,
+             "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-02T00:00:00Z",
+         })) as mock_rename:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/routes/00000000-0000-0000-0000-000000000001",
+                json={"name": "Renamed"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Renamed"
+        call_kwargs = mock_rename.call_args[1]
+        assert call_kwargs["name"] == "Renamed"
+
+
+@pytest.mark.asyncio
+async def test_rename_route_not_found():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.rename_saved_route", new_callable=lambda: AsyncMock(return_value=None)):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/routes/00000000-0000-0000-0000-000000000099",
+                json={"name": "New"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_rename_route_empty_name():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/routes/00000000-0000-0000-0000-000000000001",
+                json={"name": ""},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_rename_route_name_too_long():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/routes/00000000-0000-0000-0000-000000000001",
+                json={"name": "x" * 101},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_rename_route_only_name_accepted():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/routes/00000000-0000-0000-0000-000000000001",
+                json={"name": "OK", "route_mode": "track"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 422
+
+
+# --- DELETE does not remove planned_run ---
+
+
+@pytest.mark.asyncio
+async def test_delete_route_not_found_returns_404():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.delete_saved_route", new_callable=lambda: AsyncMock(return_value=False)):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.delete(
+                "/api/routes/00000000-0000-0000-0000-000000000099",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_route_owner_only():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.delete_saved_route", new_callable=lambda: AsyncMock(return_value=False)) as mock_delete:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.delete(
+                "/api/routes/00000000-0000-0000-0000-000000000099",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        call_kwargs = mock_delete.call_args[1]
+        assert call_kwargs["user_id"] == _mock_user()["id"]

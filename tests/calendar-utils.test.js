@@ -14,6 +14,7 @@ const {
     getMonthStart, getMonthEnd, formatDatetimeLocal, datetimeLocalToISO,
     isSameDay, getRunDayKey, buildCreateRunPayload, buildUpdateRunPayload,
     buildUpdateRunUrl, buildSaveRoutePayload, validatePointsCount,
+    buildCurrentRouteFromApi,
 } = ctx.RunRouteCalendarUtils || ctx.module.exports;
 
 // Also read production files for regression checks
@@ -330,5 +331,300 @@ describe('production code regression', () => {
     it('mode switch checks share result before clearing', () => {
         assert.ok(appJs.includes('shareResult'),
             'mode switch must check shareResult');
+    });
+});
+
+// --- Saved routes management tests ---
+
+const {
+    formatRouteMode, formatDistanceM, formatDate, dedupRoutesById,
+    buildRouteDetailUrl, buildRouteUpdateUrl, buildRouteDeleteUrl,
+} = ctx.RunRouteCalendarUtils || ctx.module.exports;
+
+describe('formatRouteMode', () => {
+    it('formats auto as Авто', () => {
+        assert.equal(formatRouteMode('auto'), 'Авто');
+    });
+    it('formats manual as Вручную', () => {
+        assert.equal(formatRouteMode('manual'), 'Вручную');
+    });
+    it('formats track as GPS', () => {
+        assert.equal(formatRouteMode('track'), 'GPS');
+    });
+    it('returns raw value for unknown mode', () => {
+        assert.equal(formatRouteMode('swim'), 'swim');
+    });
+});
+
+describe('formatDistanceM', () => {
+    it('formats 5000m as 5.0 км', () => {
+        assert.equal(formatDistanceM(5000), '5.0 км');
+    });
+    it('formats 21097m as 21.1 км', () => {
+        assert.equal(formatDistanceM(21097), '21.1 км');
+    });
+    it('formats 1000m as 1.0 км', () => {
+        assert.equal(formatDistanceM(1000), '1.0 км');
+    });
+});
+
+describe('formatDate', () => {
+    it('formats ISO date string', () => {
+        const result = formatDate('2025-06-15T10:30:00Z');
+        assert.ok(typeof result === 'string');
+        assert.ok(result.length > 0);
+    });
+});
+
+describe('dedupRoutesById', () => {
+    it('removes duplicate ids, keeps first', () => {
+        const routes = [
+            { id: 'a', name: 'First' },
+            { id: 'b', name: 'Second' },
+            { id: 'a', name: 'Duplicate' },
+        ];
+        const result = dedupRoutesById(routes);
+        assert.equal(result.length, 2);
+        assert.equal(result[0].name, 'First');
+        assert.equal(result[1].name, 'Second');
+    });
+    it('returns empty array for empty input', () => {
+        assert.deepEqual(dedupRoutesById([]), []);
+    });
+    it('keeps all unique routes', () => {
+        const routes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+        assert.equal(dedupRoutesById(routes).length, 3);
+    });
+});
+
+describe('route URL builders', () => {
+    it('buildRouteDetailUrl', () => {
+        assert.equal(buildRouteDetailUrl('abc'), '/api/routes/abc');
+    });
+    it('buildRouteUpdateUrl', () => {
+        assert.equal(buildRouteUpdateUrl('abc'), '/api/routes/abc');
+    });
+    it('buildRouteDeleteUrl', () => {
+        assert.equal(buildRouteDeleteUrl('abc'), '/api/routes/abc');
+    });
+});
+
+describe('saved routes production code regression', () => {
+    it('app.js imports formatRouteMode', () => {
+        assert.ok(appJs.includes('formatRouteMode'), 'app.js must import formatRouteMode');
+    });
+    it('app.js imports dedupRoutesById', () => {
+        assert.ok(appJs.includes('dedupRoutesById'), 'app.js must import dedupRoutesById');
+    });
+    it('app.js imports buildRouteDetailUrl', () => {
+        assert.ok(appJs.includes('buildRouteDetailUrl'), 'app.js must import buildRouteDetailUrl');
+    });
+    it('app.js has loadSavedRoutes function', () => {
+        assert.ok(appJs.includes('function loadSavedRoutes'), 'must have loadSavedRoutes');
+    });
+    it('app.js has renderSavedRoutes function', () => {
+        assert.ok(appJs.includes('function renderSavedRoutes'), 'must have renderSavedRoutes');
+    });
+    it('app.js has openSavedRoute function', () => {
+        assert.ok(appJs.includes('function openSavedRoute'), 'must have openSavedRoute');
+    });
+    it('app.js has renameSavedRoute function', () => {
+        assert.ok(appJs.includes('function renameSavedRoute'), 'must have renameSavedRoute');
+    });
+    it('app.js has deleteSavedRoute function', () => {
+        assert.ok(appJs.includes('function deleteSavedRoute'), 'must have deleteSavedRoute');
+    });
+    it('app.js has planRunWithRoute function', () => {
+        assert.ok(appJs.includes('function planRunWithRoute'), 'must have planRunWithRoute');
+    });
+    it('app.js uses textContent for route cards', () => {
+        assert.ok(!appJs.includes('card.innerHTML') && !appJs.includes('route.innerHTML'),
+            'route cards must not use innerHTML for user data');
+    });
+    it('openSavedRoute does not call generateAutoRoute or Valhalla', () => {
+        const openFn = appJs.substring(appJs.indexOf('function openSavedRoute'));
+        const endIdx = openFn.indexOf('\n// === Init all ===');
+        const fnBody = openFn.substring(0, endIdx > 0 ? endIdx : 2000);
+        assert.ok(!fnBody.includes('generateAutoRoute'), 'must not call generateAutoRoute');
+        assert.ok(!fnBody.includes('valhalla'), 'must not call Valhalla');
+    });
+    it('index.html has calendar tabs', () => {
+        const html = fs.readFileSync(path.join(__dirname, '..', 'mini-app', 'index.html'), 'utf-8');
+        assert.ok(html.includes('cal-tab-calendar'), 'must have calendar tab');
+        assert.ok(html.includes('cal-tab-routes'), 'must have routes tab');
+    });
+    it('index.html has rename route modal', () => {
+        const html = fs.readFileSync(path.join(__dirname, '..', 'mini-app', 'index.html'), 'utf-8');
+        assert.ok(html.includes('rename-route-modal'), 'must have rename modal');
+    });
+    it('style.css has route card styles', () => {
+        const css = fs.readFileSync(path.join(__dirname, '..', 'mini-app', 'style.css'), 'utf-8');
+        assert.ok(css.includes('.cal-route-card'), 'must have route card style');
+        assert.ok(css.includes('.cal-tab'), 'must have tab style');
+    });
+    it('cal-route-card does not require horizontal scroll', () => {
+        const css = fs.readFileSync(path.join(__dirname, '..', 'mini-app', 'style.css'), 'utf-8');
+        assert.ok(css.includes('.cal-route-actions'), 'must have actions style');
+        assert.ok(css.includes('flex-wrap') || css.includes('white-space: nowrap'),
+            'actions must handle narrow widths');
+    });
+});
+
+// --- Saved route viewing tests ---
+
+describe('buildCurrentRouteFromApi', () => {
+    const fakeGPX = (points, name) => '<gpx>' + name + '</gpx>';
+
+    it('preserves route_mode=auto', () => {
+        const apiRoute = {
+            id: 'r1', name: 'Auto Route', route_mode: 'auto', distance_m: 5000,
+            points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }],
+        };
+        const cr = buildCurrentRouteFromApi(apiRoute, fakeGPX);
+        assert.equal(cr.route_mode, 'auto');
+    });
+
+    it('preserves route_mode=manual', () => {
+        const apiRoute = {
+            id: 'r2', name: 'Manual', route_mode: 'manual', distance_m: 3000,
+            points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }],
+        };
+        const cr = buildCurrentRouteFromApi(apiRoute, fakeGPX);
+        assert.equal(cr.route_mode, 'manual');
+    });
+
+    it('preserves route_mode=track', () => {
+        const apiRoute = {
+            id: 'r3', name: 'Track', route_mode: 'track', distance_m: 10000,
+            points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }],
+        };
+        const cr = buildCurrentRouteFromApi(apiRoute, fakeGPX);
+        assert.equal(cr.route_mode, 'track');
+    });
+
+    it('track points preserve time and accuracy', () => {
+        const apiRoute = {
+            id: 'r4', name: 'GPS Track', route_mode: 'track', distance_m: 2000,
+            points: [
+                { lat: 55.7, lng: 37.6, time: '2025-06-15T10:00:00Z', accuracy: 5.2 },
+                { lat: 55.8, lng: 37.7, time: '2025-06-15T10:05:00Z', accuracy: 3.1 },
+            ],
+        };
+        const cr = buildCurrentRouteFromApi(apiRoute, fakeGPX);
+        assert.equal(cr.points[0].time, '2025-06-15T10:00:00Z');
+        assert.equal(cr.points[0].accuracy, 5.2);
+        assert.equal(cr.points[1].time, '2025-06-15T10:05:00Z');
+        assert.equal(cr.points[1].accuracy, 3.1);
+    });
+
+    it('currentRoute contains gpx', () => {
+        const apiRoute = {
+            id: 'r5', name: 'GPX Test', route_mode: 'auto', distance_m: 5000,
+            points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }],
+        };
+        const cr = buildCurrentRouteFromApi(apiRoute, fakeGPX);
+        assert.ok(cr.gpx.includes('GPX Test'));
+    });
+
+    it('source is saved', () => {
+        const apiRoute = {
+            id: 'r6', name: 'Src', route_mode: 'auto', distance_m: 1000,
+            points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }],
+        };
+        const cr = buildCurrentRouteFromApi(apiRoute, fakeGPX);
+        assert.equal(cr.source, 'saved');
+    });
+
+    it('saved_route_id matches', () => {
+        const apiRoute = {
+            id: 'r7', name: 'ID', route_mode: 'auto', distance_m: 1000,
+            points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }],
+        };
+        const cr = buildCurrentRouteFromApi(apiRoute, fakeGPX);
+        assert.equal(cr.saved_route_id, 'r7');
+    });
+
+    it('distance_km computed from distance_m', () => {
+        const apiRoute = {
+            id: 'r8', name: 'Dist', route_mode: 'auto', distance_m: 7500,
+            points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }],
+        };
+        const cr = buildCurrentRouteFromApi(apiRoute, fakeGPX);
+        assert.equal(cr.distance_km, 7.5);
+    });
+
+    it('points are copies, not originals', () => {
+        const original = [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }];
+        const apiRoute = {
+            id: 'r9', name: 'Copy', route_mode: 'auto', distance_m: 1000,
+            points: original,
+        };
+        const cr = buildCurrentRouteFromApi(apiRoute, fakeGPX);
+        cr.points[0].lat = 0;
+        assert.equal(original[0].lat, 55.7);
+    });
+});
+
+describe('saved route viewing production code regression', () => {
+    it('openSavedRoute uses buildCurrentRouteFromApi', () => {
+        assert.ok(appJs.includes('buildCurrentRouteFromApi'),
+            'openSavedRoute must use buildCurrentRouteFromApi');
+    });
+
+    it('openSavedRoute does not set routeMode', () => {
+        const fn = appJs.substring(appJs.indexOf('async function openSavedRoute'));
+        const endIdx = fn.indexOf('\nfunction renameSavedRoute');
+        const body = fn.substring(0, endIdx > 0 ? endIdx : 2000);
+        assert.ok(!body.includes("routeMode ="),
+            'openSavedRoute must not change routeMode');
+    });
+
+    it('openSavedRoute does not call updateUIForMode', () => {
+        const fn = appJs.substring(appJs.indexOf('async function openSavedRoute'));
+        const endIdx = fn.indexOf('\nfunction renameSavedRoute');
+        const body = fn.substring(0, endIdx > 0 ? endIdx : 2000);
+        assert.ok(!body.includes('updateUIForMode'),
+            'openSavedRoute must not call updateUIForMode');
+    });
+
+    it('openSavedRoute uses displayRoute', () => {
+        const fn = appJs.substring(appJs.indexOf('async function openSavedRoute'));
+        const endIdx = fn.indexOf('\nfunction renameSavedRoute');
+        const body = fn.substring(0, endIdx > 0 ? endIdx : 2000);
+        assert.ok(body.includes('displayRoute'),
+            'openSavedRoute must use displayRoute');
+    });
+
+    it('openSavedRoute uses showRouteButtons saved', () => {
+        const fn = appJs.substring(appJs.indexOf('async function openSavedRoute'));
+        const endIdx = fn.indexOf('\nfunction renameSavedRoute');
+        const body = fn.substring(0, endIdx > 0 ? endIdx : 2000);
+        assert.ok(body.includes("showRouteButtons('saved')"),
+            'openSavedRoute must show saved buttons');
+    });
+
+    it('showRouteButtons handles saved mode', () => {
+        assert.ok(appJs.includes("'saved'") || appJs.includes('"saved"'),
+            'showRouteButtons must handle saved mode');
+    });
+
+    it('deleteSavedRoute shows error on failure', () => {
+        const fn = appJs.substring(appJs.indexOf('async function deleteSavedRoute'));
+        const endIdx = fn.indexOf('\nfunction planRunWithRoute');
+        const body = fn.substring(0, endIdx > 0 ? endIdx : 2000);
+        assert.ok(body.includes("showToast('Не удалось удалить маршрут')") ||
+                  body.includes('showToast("Не удалось удалить маршрут")'),
+            'delete must show error on HTTP failure');
+        assert.ok(body.includes("showToast('Ошибка сети')") ||
+                  body.includes('showToast("Ошибка сети")'),
+            'delete must show error on network failure');
+    });
+
+    it('deleteSavedRoute does not have silent catch', () => {
+        const fn = appJs.substring(appJs.indexOf('async function deleteSavedRoute'));
+        const endIdx = fn.indexOf('\nfunction planRunWithRoute');
+        const body = fn.substring(0, endIdx > 0 ? endIdx : 2000);
+        assert.ok(!body.includes('/* silent */'),
+            'delete must not silently swallow errors');
     });
 });

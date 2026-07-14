@@ -37,7 +37,8 @@ async def list_saved_routes(user_id: UUID) -> list[dict]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, name, route_mode, distance_m, points, created_at, updated_at
+            SELECT id, name, route_mode, distance_m, created_at, updated_at,
+                   jsonb_array_length(points) AS points_count
             FROM public.saved_routes
             WHERE user_id = $1
             ORDER BY created_at DESC
@@ -58,6 +59,22 @@ async def get_saved_route(user_id: UUID, route_id: UUID) -> Optional[dict]:
             """,
             route_id,
             user_id,
+        )
+    return dict(row) if row else None
+
+
+async def rename_saved_route(user_id: UUID, route_id: UUID, name: str) -> Optional[dict]:
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE public.saved_routes SET name = $3
+            WHERE id = $1 AND user_id = $2
+            RETURNING id, name, route_mode, distance_m, created_at, updated_at
+            """,
+            route_id,
+            user_id,
+            name,
         )
     return dict(row) if row else None
 

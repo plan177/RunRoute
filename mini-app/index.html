@@ -427,16 +427,31 @@
                 <div class="skeleton skeleton-line short"></div>
             </div>
             <div id="calendar-content" class="hidden">
-                <div class="calendar-nav">
-                    <button id="cal-prev" class="btn-icon" aria-label="Предыдущий месяц">&lsaquo;</button>
-                    <span id="cal-month-label" class="cal-month-label"></span>
-                    <button id="cal-next" class="btn-icon" aria-label="Следующий месяц">&rsaquo;</button>
+                <div class="cal-tabs">
+                    <button id="cal-tab-calendar" class="cal-tab active" data-cal-tab="calendar">Календарь</button>
+                    <button id="cal-tab-routes" class="cal-tab" data-cal-tab="routes">Маршруты</button>
                 </div>
-                <div id="cal-days" class="cal-days"></div>
-                <div id="cal-events" class="cal-events">
-                    <p class="cal-empty">Нет пробежек</p>
+                <div id="cal-panel-calendar">
+                    <div class="calendar-nav">
+                        <button id="cal-prev" class="btn-icon" aria-label="Предыдущий месяц">&lsaquo;</button>
+                        <span id="cal-month-label" class="cal-month-label"></span>
+                        <button id="cal-next" class="btn-icon" aria-label="Следующий месяц">&rsaquo;</button>
+                    </div>
+                    <div id="cal-days" class="cal-days"></div>
+                    <div id="cal-events" class="cal-events">
+                        <p class="cal-empty">Нет пробежек</p>
+                    </div>
+                    <button id="cal-add-run" class="btn-primary" style="width:100%;margin-top:12px;">Запланировать пробежку</button>
                 </div>
-                <button id="cal-add-run" class="btn-primary" style="width:100%;margin-top:12px;">Запланировать пробежку</button>
+                <div id="cal-panel-routes" class="hidden">
+                    <div id="cal-routes-loading" class="profile-loading">
+                        <div class="skeleton skeleton-line"></div>
+                        <div class="skeleton skeleton-line short"></div>
+                    </div>
+                    <div id="cal-routes-list"></div>
+                    <div id="cal-routes-empty" class="cal-empty hidden">Сохранённых маршрутов пока нет</div>
+                    <div id="cal-routes-status" class="profile-status hidden"></div>
+                </div>
             </div>
             <div id="calendar-status" class="profile-status hidden"></div>
             <div class="modal-actions">
@@ -488,6 +503,21 @@
             <div class="modal-actions">
                 <button id="run-form-save" class="modal-btn primary">Создать</button>
                 <button id="run-form-cancel" class="modal-btn secondary">Отмена</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="rename-route-modal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <p class="modal-text">Переименовать маршрут</p>
+            <div class="profile-field">
+                <label for="rename-route-name">Название</label>
+                <input type="text" id="rename-route-name" maxlength="100" />
+            </div>
+            <div id="rename-route-status" class="profile-status hidden"></div>
+            <div class="modal-actions">
+                <button id="rename-route-confirm" class="modal-btn primary">Сохранить</button>
+                <button id="rename-route-cancel" class="modal-btn secondary">Отмена</button>
             </div>
         </div>
     </div>

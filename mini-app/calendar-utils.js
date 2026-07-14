@@ -94,6 +94,53 @@
         return true;
     }
 
+    function formatRouteMode(mode) {
+        const modes = { auto: 'Авто', manual: 'Вручную', track: 'GPS' };
+        return modes[mode] || mode;
+    }
+
+    function formatDistanceM(m) {
+        return (m / 1000).toFixed(1) + ' км';
+    }
+
+    function formatDate(iso) {
+        return new Date(iso).toLocaleDateString('ru');
+    }
+
+    function dedupRoutesById(routes) {
+        const seen = new Set();
+        return routes.filter(r => {
+            if (seen.has(r.id)) return false;
+            seen.add(r.id);
+            return true;
+        });
+    }
+
+    function buildRouteDetailUrl(routeId) {
+        return `/api/routes/${routeId}`;
+    }
+
+    function buildRouteUpdateUrl(routeId) {
+        return `/api/routes/${routeId}`;
+    }
+
+    function buildRouteDeleteUrl(routeId) {
+        return `/api/routes/${routeId}`;
+    }
+
+    function buildCurrentRouteFromApi(apiRoute, makeGPXFn) {
+        const points = apiRoute.points.map(p => ({ ...p }));
+        return {
+            source: 'saved',
+            saved_route_id: apiRoute.id,
+            route_mode: apiRoute.route_mode,
+            name: apiRoute.name,
+            points,
+            distance_km: apiRoute.distance_m / 1000,
+            gpx: makeGPXFn(points, apiRoute.name),
+        };
+    }
+
     return {
         getMonthStart,
         getMonthEnd,
@@ -105,6 +152,14 @@
         buildUpdateRunPayload,
         buildUpdateRunUrl,
         buildSaveRoutePayload,
-        validatePointsCount
+        validatePointsCount,
+        formatRouteMode,
+        formatDistanceM,
+        formatDate,
+        dedupRoutesById,
+        buildRouteDetailUrl,
+        buildRouteUpdateUrl,
+        buildRouteDeleteUrl,
+        buildCurrentRouteFromApi
     };
 });

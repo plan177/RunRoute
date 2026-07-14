@@ -12,8 +12,8 @@ from .database import init_db_pool, close_db_pool, check_database_connection
 from .auth import get_current_telegram_user
 from .users import upsert_user
 from .profiles import get_profile, upsert_profile
-from .models import ProfileUpdateRequest, SavedRouteCreate, PlannedRunCreate, PlannedRunUpdate
-from .routes import create_saved_route, list_saved_routes, get_saved_route, delete_saved_route
+from .models import ProfileUpdateRequest, SavedRouteCreate, SavedRouteRename, PlannedRunCreate, PlannedRunUpdate
+from .routes import create_saved_route, list_saved_routes, get_saved_route, rename_saved_route, delete_saved_route
 from .calendar import (
     create_planned_run, list_planned_runs, get_planned_run,
     update_planned_run, cancel_planned_run,
@@ -250,6 +250,35 @@ async def get_route_endpoint(
         raise
     except Exception:
         logger.error("Failed to get route")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.put("/api/routes/{route_id}")
+async def rename_route_endpoint(
+    route_id: str,
+    request: SavedRouteRename,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        route = await rename_saved_route(
+            user_id=user["id"], route_id=UUID(route_id), name=request.name,
+        )
+        if route is None:
+            raise HTTPException(status_code=404, detail="Route not found")
+        return route
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to rename route")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

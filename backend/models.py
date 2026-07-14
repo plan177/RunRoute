@@ -180,6 +180,7 @@ class SavedRouteCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v):
+        v = v.strip()
         if not (1 <= len(v) <= 100):
             raise ValueError("name must be 1-100 characters")
         return v
@@ -205,6 +206,20 @@ class SavedRouteCreate(BaseModel):
             raise ValueError("at least 2 points required")
         if len(v) > MAX_ROUTE_POINTS:
             raise ValueError(f"maximum {MAX_ROUTE_POINTS} points allowed")
+        return v
+
+    model_config = {"extra": "forbid"}
+
+
+class SavedRouteRename(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v):
+        v = v.strip()
+        if not (1 <= len(v) <= 100):
+            raise ValueError("name must be 1-100 characters")
         return v
 
     model_config = {"extra": "forbid"}
