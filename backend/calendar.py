@@ -21,41 +21,44 @@ async def create_planned_run(
 ) -> dict:
     pool = get_db_pool()
     async with pool.acquire() as conn:
-        if saved_route_id is not None:
-            route_check = await conn.fetchval(
-                "SELECT id FROM public.saved_routes WHERE id = $1 AND user_id = $2",
-                saved_route_id,
-                user_id,
-            )
-            if route_check is None:
-                return None
+        async with conn.transaction():
+            if saved_route_id is not None:
+                route_check = await conn.fetchval(
+                    "SELECT id FROM public.saved_routes WHERE id = $1 AND user_id = $2",
+                    saved_route_id,
+                    user_id,
+                )
+                if route_check is None:
+                    return None
 
-        row = await conn.fetchrow(
-            """
-            INSERT INTO public.planned_runs
-                (user_id, saved_route_id, title, starts_at, duration_minutes, notes, reminder_minutes, notifications_enabled)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, saved_route_id, title, starts_at, duration_minutes, notes,
-                      reminder_minutes, notifications_enabled, status, created_at, updated_at
-            """,
-            user_id,
-            saved_route_id,
-            title,
-            starts_at,
-            duration_minutes,
-            notes,
-            reminder_minutes,
-            notifications_enabled,
-        )
-    run = dict(row)
-    await sync_run_reminder(
-        user_id=user_id,
-        planned_run_id=run["id"],
-        starts_at=starts_at,
-        reminder_minutes=reminder_minutes,
-        status=run["status"],
-        notifications_enabled=notifications_enabled,
-    )
+            row = await conn.fetchrow(
+                """
+                INSERT INTO public.planned_runs
+                    (user_id, saved_route_id, title, starts_at, duration_minutes, notes, reminder_minutes, notifications_enabled)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id, saved_route_id, title, starts_at, duration_minutes, notes,
+                          reminder_minutes, notifications_enabled, status, created_at, updated_at
+                """,
+                user_id,
+                saved_route_id,
+                title,
+                starts_at,
+                duration_minutes,
+                notes,
+                reminder_minutes,
+                notifications_enabled,
+            )
+            run = dict(row)
+
+            await sync_run_reminder(
+                user_id=user_id,
+                planned_run_id=run["id"],
+                starts_at=starts_at,
+                reminder_minutes=reminder_minutes,
+                status=run["status"],
+                notifications_enabled=notifications_enabled,
+                conn=conn,
+            )
     return run
 
 
@@ -108,72 +111,76 @@ async def update_planned_run(
 
     pool = get_db_pool()
     async with pool.acquire() as conn:
-        if "saved_route_id" in fields:
-            rid = fields["saved_route_id"]
-            if rid is not None:
-                route_check = await conn.fetchval(
-                    "SELECT id FROM public.saved_routes WHERE id = $1 AND user_id = $2",
-                    rid, user_id,
+        async with conn.transaction():
+            if "saved_route_id" in fields:
+                rid = fields["saved_route_id"]
+                if rid is not None:
+                    route_check = await conn.fetchval(
+                        "SELECT id FROM public.saved_routes WHERE id = $1 AND user_id = $2",
+                        rid, user_id,
+                    )
+                    if route_check is None:
+                        return "route_not_found"
+
+            set_clauses = []
+            params = [run_id, user_id]
+            idx = 3
+            for key in ("saved_route_id", "title", "starts_at", "duration_minutes", "notes", "reminder_minutes", "notifications_enabled"):
+                if key in fields:
+                    set_clauses.append(f"{key} = ${idx}")
+                    params.append(fields[key])
+                    idx += 1
+
+            if not set_clauses:
+                return dict(existing)
+
+            sql = f"""
+                UPDATE public.planned_runs SET {', '.join(set_clauses)}
+                WHERE id = $1 AND user_id = $2
+                RETURNING id, saved_route_id, title, starts_at, duration_minutes, notes,
+                          reminder_minutes, notifications_enabled, status, created_at, updated_at
+            """
+            row = await conn.fetchrow(sql, *params)
+            run = dict(row)
+
+            reminder_keys = {"starts_at", "reminder_minutes", "status", "notifications_enabled"}
+            if reminder_keys & set(fields.keys()):
+                await sync_run_reminder(
+                    user_id=user_id,
+                    planned_run_id=run["id"],
+                    starts_at=run["starts_at"],
+                    reminder_minutes=run["reminder_minutes"],
+                    status=run["status"],
+                    notifications_enabled=run["notifications_enabled"],
+                    conn=conn,
                 )
-                if route_check is None:
-                    return "route_not_found"
-
-        set_clauses = []
-        params = [run_id, user_id]
-        idx = 3
-        for key in ("saved_route_id", "title", "starts_at", "duration_minutes", "notes", "reminder_minutes", "notifications_enabled"):
-            if key in fields:
-                set_clauses.append(f"{key} = ${idx}")
-                params.append(fields[key])
-                idx += 1
-
-        if not set_clauses:
-            return dict(existing)
-
-        sql = f"""
-            UPDATE public.planned_runs SET {', '.join(set_clauses)}
-            WHERE id = $1 AND user_id = $2
-            RETURNING id, saved_route_id, title, starts_at, duration_minutes, notes,
-                      reminder_minutes, notifications_enabled, status, created_at, updated_at
-        """
-        row = await conn.fetchrow(sql, *params)
-
-    run = dict(row)
-    # Reschedule reminder if relevant fields changed
-    reminder_keys = {"starts_at", "reminder_minutes", "status", "notifications_enabled"}
-    if reminder_keys & set(fields.keys()):
-        await sync_run_reminder(
-            user_id=user_id,
-            planned_run_id=run["id"],
-            starts_at=run["starts_at"],
-            reminder_minutes=run["reminder_minutes"],
-            status=run["status"],
-            notifications_enabled=run["notifications_enabled"],
-        )
     return run
 
 
 async def cancel_planned_run(user_id: UUID, run_id: UUID) -> Optional[dict]:
     pool = get_db_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE public.planned_runs SET status = 'cancelled'
-            WHERE id = $1 AND user_id = $2
-            RETURNING id, saved_route_id, title, starts_at, duration_minutes, notes,
-                      reminder_minutes, notifications_enabled, status, created_at, updated_at
-            """,
-            run_id,
-            user_id,
-        )
-    run = dict(row) if row else None
-    if run:
-        await sync_run_reminder(
-            user_id=user_id,
-            planned_run_id=run["id"],
-            starts_at=run["starts_at"],
-            reminder_minutes=None,
-            status="cancelled",
-            notifications_enabled=False,
-        )
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                UPDATE public.planned_runs SET status = 'cancelled'
+                WHERE id = $1 AND user_id = $2
+                RETURNING id, saved_route_id, title, starts_at, duration_minutes, notes,
+                          reminder_minutes, notifications_enabled, status, created_at, updated_at
+                """,
+                run_id,
+                user_id,
+            )
+            if row is None:
+                return None
+            run = dict(row)
+            await sync_run_reminder(
+                user_id=user_id,
+                planned_run_id=run["id"],
+                starts_at=run["starts_at"],
+                reminder_minutes=None,
+                status="cancelled",
+                notifications_enabled=False,
+                conn=conn,
+            )
     return run

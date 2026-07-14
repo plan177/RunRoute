@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -8,6 +8,7 @@ from .database import get_db_pool
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
+STALE_PROCESSING_TIMEOUT_MINUTES = 5
 
 
 async def sync_run_reminder(
@@ -17,48 +18,122 @@ async def sync_run_reminder(
     reminder_minutes: Optional[int],
     status: str = "planned",
     notifications_enabled: bool = True,
+    conn=None,
 ) -> None:
     """Create, reschedule, or cancel a pending reminder for a planned run.
 
     Called after every create/update/cancel of a planned run.
+    If conn is provided, uses it (caller manages the transaction).
+    """
+    should_remind = (
+        status == "planned"
+        and notifications_enabled
+        and reminder_minutes is not None
+        and reminder_minutes > 0
+    )
+
+    if conn is not None:
+        await _sync_on_conn(conn, planned_run_id, user_id, starts_at, reminder_minutes, should_remind)
+    else:
+        pool = get_db_pool()
+        async with pool.acquire() as c:
+            await _sync_on_conn(c, planned_run_id, user_id, starts_at, reminder_minutes, should_remind)
+
+
+async def _sync_on_conn(conn, planned_run_id, user_id, starts_at, reminder_minutes, should_remind):
+    # Remove any existing pending/processing reminder for this run
+    await conn.execute(
+        """
+        DELETE FROM public.reminder_deliveries
+        WHERE planned_run_id = $1 AND status IN ('pending', 'processing')
+        """,
+        planned_run_id,
+    )
+
+    if not should_remind:
+        return
+
+    scheduled_for = starts_at - timedelta(minutes=reminder_minutes)
+    now = datetime.now(timezone.utc)
+
+    if scheduled_for <= now:
+        return
+
+    await conn.execute(
+        """
+        INSERT INTO public.reminder_deliveries (planned_run_id, user_id, scheduled_for)
+        VALUES ($1, $2, $3)
+        """,
+        planned_run_id,
+        user_id,
+        scheduled_for,
+    )
+
+
+async def recover_stale_processing() -> int:
+    """Reset reminders stuck in 'processing' after a restart.
+
+    Returns the number of recovered reminders.
     """
     pool = get_db_pool()
     async with pool.acquire() as conn:
-        # Remove any existing pending/processing reminder for this run
-        await conn.execute(
+        threshold = datetime.now(timezone.utc) - timedelta(minutes=STALE_PROCESSING_TIMEOUT_MINUTES)
+
+        # Reset to pending if under max attempts
+        recovered = await conn.fetchval(
             """
-            DELETE FROM public.reminder_deliveries
-            WHERE planned_run_id = $1 AND status IN ('pending', 'processing')
+            UPDATE public.reminder_deliveries
+            SET status = 'pending'
+            WHERE status = 'processing'
+              AND updated_at < $1
+              AND attempts < $2
+            RETURNING COUNT(*)
             """,
-            planned_run_id,
+            threshold,
+            MAX_ATTEMPTS,
         )
 
-        # Create new reminder only if conditions are met
-        should_remind = (
-            status == "planned"
-            and notifications_enabled
-            and reminder_minutes is not None
-            and reminder_minutes > 0
-        )
-        if not should_remind:
-            return
-
-        scheduled_for = starts_at - __import__("datetime").timedelta(minutes=reminder_minutes)
-        now = datetime.now(timezone.utc)
-
-        # Don't create reminders for past times
-        if scheduled_for <= now:
-            return
-
-        await conn.execute(
+        # Fail permanently if max attempts reached
+        failed = await conn.fetchval(
             """
-            INSERT INTO public.reminder_deliveries (planned_run_id, user_id, scheduled_for)
-            VALUES ($1, $2, $3)
+            UPDATE public.reminder_deliveries
+            SET status = 'failed', last_error = 'stale_after_restart'
+            WHERE status = 'processing'
+              AND updated_at < $1
+              AND attempts >= $2
+            RETURNING COUNT(*)
             """,
-            planned_run_id,
-            user_id,
-            scheduled_for,
+            threshold,
+            MAX_ATTEMPTS,
         )
+
+        total = (recovered or 0) + (failed or 0)
+        if total > 0:
+            logger.info("Recovered %d stale processing reminders (%d pending, %d failed)",
+                        total, recovered or 0, failed or 0)
+        return total
+
+
+async def verify_reminder_still_valid(reminder_id: UUID) -> Optional[dict]:
+    """Check that a reminder is still in 'processing' and its run is still planned.
+
+    Returns the reminder dict if valid, None otherwise.
+    """
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT rd.id, rd.planned_run_id, rd.user_id
+            FROM public.reminder_deliveries rd
+            JOIN public.planned_runs pr ON pr.id = rd.planned_run_id
+            WHERE rd.id = $1
+              AND rd.status = 'processing'
+              AND pr.status = 'planned'
+              AND pr.notifications_enabled = true
+            """,
+            reminder_id,
+        )
+    return dict(row) if row else None
 
 
 async def fetch_due_reminders(limit: int = 10) -> list[dict]:
@@ -125,7 +200,7 @@ async def mark_failed(reminder_id: UUID, error: str) -> None:
     """Mark a reminder as failed. If max attempts reached, set to 'failed'."""
     pool = get_db_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
+        await conn.execute(
             """
             UPDATE public.reminder_deliveries
             SET last_error = $2,
@@ -134,7 +209,6 @@ async def mark_failed(reminder_id: UUID, error: str) -> None:
                     ELSE 'pending'
                 END
             WHERE id = $1
-            RETURNING attempts
             """,
             reminder_id,
             error[:500],

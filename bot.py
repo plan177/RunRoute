@@ -90,13 +90,66 @@ def _format_reminder_message(run: dict) -> str:
     return "\n".join(lines)
 
 
+async def process_due_reminders_once(bot) -> int:
+    """Process one batch of due reminders. Returns number processed.
+
+    Separated from the loop for testability.
+    """
+    from backend.reminders import (
+        recover_stale_processing, fetch_due_reminders,
+        verify_reminder_still_valid, mark_sent, mark_failed,
+    )
+
+    await recover_stale_processing()
+
+    due = await fetch_due_reminders(limit=10)
+    sent_count = 0
+
+    for run in due:
+        telegram_user_id = run["telegram_user_id"]
+
+        # Re-verify: run still planned and notifications enabled
+        valid = await verify_reminder_still_valid(run["id"])
+        if valid is None:
+            # Reminder cancelled or run cancelled — skip silently
+            await mark_sent(run["id"])
+            continue
+
+        text = _format_reminder_message(run)
+        keyboard = [
+            [InlineKeyboardButton(
+                "Открыть RunRoute",
+                web_app=WebAppInfo(url=WEB_APP_URL),
+            )]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            await bot.send_message(
+                chat_id=telegram_user_id,
+                text=text,
+                reply_markup=reply_markup,
+            )
+            await mark_sent(run["id"])
+            sent_count += 1
+        except Exception as e:
+            error_str = str(e)
+            if "blocked" in error_str.lower() or "forbidden" in error_str.lower():
+                logger.warning("User blocked the bot, marking reminder failed")
+                await mark_failed(run["id"], "user_blocked")
+            else:
+                logger.error("Failed to send reminder: %s", error_str[:200])
+                await mark_failed(run["id"], error_str[:500])
+
+    return sent_count
+
+
 async def reminder_worker(app):
     """Background coroutine that sends due reminders.
 
     Runs alongside Telegram polling in the same process.
     """
-    from backend.database import init_db_pool, close_db_pool, get_db_pool
-    from backend.reminders import fetch_due_reminders, mark_sent, mark_failed
+    from backend.database import init_db_pool, close_db_pool
 
     await init_db_pool()
     logger.info("Reminder worker started")
@@ -104,35 +157,7 @@ async def reminder_worker(app):
     try:
         while True:
             try:
-                due = await fetch_due_reminders(limit=10)
-                for run in due:
-                    telegram_user_id = run["telegram_user_id"]
-                    text = _format_reminder_message(run)
-
-                    keyboard = [
-                        [InlineKeyboardButton(
-                            "Открыть RunRoute",
-                            web_app=WebAppInfo(url=WEB_APP_URL),
-                        )]
-                    ]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-
-                    try:
-                        await app.bot.send_message(
-                            chat_id=telegram_user_id,
-                            text=text,
-                            reply_markup=reply_markup,
-                        )
-                        await mark_sent(run["id"])
-                    except Exception as e:
-                        error_str = str(e)
-                        # Handle blocked user gracefully
-                        if "blocked" in error_str.lower() or "forbidden" in error_str.lower():
-                            logger.warning("User %s blocked the bot, marking reminder failed", telegram_user_id)
-                            await mark_failed(run["id"], "user_blocked")
-                        else:
-                            logger.error("Failed to send reminder %s: %s", run["id"], error_str[:200])
-                            await mark_failed(run["id"], error_str[:500])
+                await process_due_reminders_once(app.bot)
             except Exception:
                 logger.error("Reminder worker iteration failed", exc_info=True)
 
