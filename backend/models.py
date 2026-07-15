@@ -331,11 +331,7 @@ class PlannedRunUpdate(BaseModel):
 # --- Public profiles and follows ---
 
 
-class FollowResponse(BaseModel):
-    success: bool
-    is_following: bool
+class FollowNotificationsUpdate(BaseModel):
+    enabled: bool
 
-
-class MuteResponse(BaseModel):
-    success: bool
-    is_muted: bool
+    model_config = {"extra": "forbid"}

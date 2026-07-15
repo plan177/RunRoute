@@ -37,22 +37,15 @@ async def get_profile(user_id: UUID) -> dict:
     return d
 
 
-async def get_public_profile(user_id: UUID) -> Optional[dict]:
-    """Get a user's public profile for viewing by others.
-
-    Returns None if profile doesn't exist or is not public.
-    """
+async def get_profile_owner(user_id: UUID) -> Optional[dict]:
+    """Get profile for owner — returns None if no profile row exists."""
     pool = get_db_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT p.display_name, p.bio, p.city, p.club_name, p.avatar_url,
-                   p.social_links, p.is_public,
-                   u.id, u.telegram_username, u.first_name, u.last_name,
-                   u.telegram_photo_url
-            FROM public.profiles p
-            JOIN public.users u ON u.id = p.user_id
-            WHERE p.user_id = $1 AND p.is_public = true
+            SELECT display_name, bio, city, club_name, avatar_url, social_links, is_public
+            FROM public.profiles
+            WHERE user_id = $1
             """,
             user_id,
         )
@@ -62,6 +55,52 @@ async def get_public_profile(user_id: UUID) -> Optional[dict]:
     if d["social_links"] is None:
         d["social_links"] = {}
     return d
+
+
+async def get_public_profile(user_id: UUID, viewer_id: Optional[UUID] = None) -> Optional[dict]:
+    """Get a user's public profile for viewing by others.
+
+    Returns None if profile doesn't exist.
+    If viewer_id is the owner, returns even private profiles.
+    If viewer_id is None or different, only returns public profiles.
+    """
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        if viewer_id is not None and viewer_id == user_id:
+            row = await conn.fetchrow(
+                """
+                SELECT user_id, display_name, bio, city, club_name, avatar_url, social_links
+                FROM public.profiles
+                WHERE user_id = $1
+                """,
+                user_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                SELECT user_id, display_name, bio, city, club_name, avatar_url, social_links
+                FROM public.profiles
+                WHERE user_id = $1 AND is_public = true
+                """,
+                user_id,
+            )
+    if row is None:
+        return None
+    d = dict(row)
+    if d["social_links"] is None:
+        d["social_links"] = {}
+    return d
+
+
+async def user_exists(user_id: UUID) -> bool:
+    """Check if a user exists in the users table."""
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM public.users WHERE id = $1)",
+            user_id,
+        )
+    return bool(row)
 
 
 async def upsert_profile(

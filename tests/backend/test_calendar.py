@@ -1336,7 +1336,8 @@ async def test_follow_user_private_profile():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.is_profile_public", new_callable=lambda: AsyncMock(return_value=False)):
+         patch("backend.main.user_exists", new_callable=lambda: AsyncMock(return_value=True)), \
+         patch("backend.main.get_profile", new_callable=lambda: AsyncMock(return_value={"is_public": False})):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
@@ -1344,7 +1345,25 @@ async def test_follow_user_private_profile():
                 headers={"X-Telegram-Init-Data": init_data},
             )
         assert resp.status_code == 404
-        assert "not public" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_follow_user_not_found():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.user_exists", new_callable=lambda: AsyncMock(return_value=False)):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/users/00000000-0000-0000-0000-000000000099/follow",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -1355,8 +1374,12 @@ async def test_follow_user_success():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.is_profile_public", new_callable=lambda: AsyncMock(return_value=True)), \
-         patch("backend.main.follow_user", new_callable=lambda: AsyncMock(return_value=True)):
+         patch("backend.main.user_exists", new_callable=lambda: AsyncMock(return_value=True)), \
+         patch("backend.main.get_profile", new_callable=lambda: AsyncMock(return_value={"is_public": True})), \
+         patch("backend.main.follow_user", new_callable=lambda: AsyncMock(return_value=True)), \
+         patch("backend.main.get_follow_counts", new_callable=lambda: AsyncMock(return_value={
+             "followers_count": 10, "following_count": 0,
+         })):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
@@ -1364,7 +1387,10 @@ async def test_follow_user_success():
                 headers={"X-Telegram-Init-Data": init_data},
             )
         assert resp.status_code == 200
-        assert resp.json()["is_following"] is True
+        data = resp.json()
+        assert data["is_following"] is True
+        assert data["followers_count"] == 10
+        assert data["run_notifications_enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -1375,7 +1401,10 @@ async def test_unfollow_user_success():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.unfollow_user", new_callable=lambda: AsyncMock(return_value=True)):
+         patch("backend.main.unfollow_user", new_callable=lambda: AsyncMock()), \
+         patch("backend.main.get_follow_counts", new_callable=lambda: AsyncMock(return_value={
+             "followers_count": 9, "following_count": 0,
+         })):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.delete(
@@ -1383,7 +1412,10 @@ async def test_unfollow_user_success():
                 headers={"X-Telegram-Init-Data": init_data},
             )
         assert resp.status_code == 200
-        assert resp.json()["is_following"] is False
+        data = resp.json()
+        assert data["is_following"] is False
+        assert data["followers_count"] == 9
+        assert data["run_notifications_enabled"] is None
 
 
 @pytest.mark.asyncio
@@ -1397,13 +1429,98 @@ async def test_set_notifications_success():
          patch("backend.main.set_run_notifications", new_callable=lambda: AsyncMock(return_value=True)):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post(
-                "/api/users/00000000-0000-0000-0000-000000000099/notifications",
+            resp = await client.put(
+                "/api/users/00000000-0000-0000-0000-000000000099/follow/notifications",
                 json={"enabled": False},
                 headers={"X-Telegram-Init-Data": init_data},
             )
         assert resp.status_code == 200
         assert resp.json()["run_notifications_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_set_notifications_no_follow():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.set_run_notifications", new_callable=lambda: AsyncMock(return_value=False)):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/users/00000000-0000-0000-0000-000000000099/follow/notifications",
+                json={"enabled": False},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_set_notifications_extra_fields():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/users/00000000-0000-0000-0000-000000000099/follow/notifications",
+                json={"enabled": True, "extra": "field"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_invalid_uuid_returns_422():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/users/not-a-uuid/follow",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_invalid_cursor_returns_400():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/me/followers?cursor=invalid-cursor",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_limit_over_100_rejected():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/me/followers?limit=101",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -1433,18 +1550,16 @@ async def test_get_public_profile_no_telegram_fields():
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
          patch("backend.main.get_public_profile", new_callable=lambda: AsyncMock(return_value={
-             "id": "00000000-0000-0000-0000-000000000099",
-             "telegram_username": "runner",
-             "first_name": "Runner",
-             "last_name": "User",
-             "telegram_photo_url": "https://t.me/photo",
+             "user_id": "00000000-0000-0000-0000-000000000099",
              "display_name": "Pro Runner",
              "bio": "I run",
              "city": "Moscow",
-             "is_public": True,
+             "club_name": None,
+             "avatar_url": None,
+             "social_links": {},
          })), \
          patch("backend.main.is_following", new_callable=lambda: AsyncMock(return_value=False)), \
-         patch("backend.main.get_run_notifications_enabled", new_callable=lambda: AsyncMock(return_value=True)), \
+         patch("backend.main.get_run_notifications_enabled", new_callable=lambda: AsyncMock(return_value=None)), \
          patch("backend.main.get_follow_counts", new_callable=lambda: AsyncMock(return_value={
              "followers_count": 5, "following_count": 3,
          })):
@@ -1457,10 +1572,14 @@ async def test_get_public_profile_no_telegram_fields():
         assert resp.status_code == 200
         data = resp.json()
         profile = data["profile"]
-        assert "telegram_username" not in profile
-        assert "telegram_photo_url" not in profile
-        assert profile["first_name"] == "Runner"
+        for field in ("telegram_username", "telegram_photo_url", "first_name", "last_name",
+                       "language_code", "is_active", "created_at", "updated_at"):
+            assert field not in profile, f"{field} should not be in profile"
+        assert profile["display_name"] == "Pro Runner"
+        assert profile["bio"] == "I run"
+        assert profile["city"] == "Moscow"
         assert data["is_following"] is False
+        assert data["run_notifications_enabled"] is None
         assert data["followers_count"] == 5
         assert data["following_count"] == 3
 
@@ -1474,7 +1593,7 @@ async def test_get_my_followers_success():
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
          patch("backend.main.get_followers", new_callable=lambda: AsyncMock(return_value={
-             "users": [{"id": "user-1", "first_name": "F1", "last_name": "L1"}],
+             "users": [{"user_id": "user-1", "display_name": "F1", "avatar_url": None, "city": None, "club_name": None}],
              "next_cursor": None,
          })):
         transport = ASGITransport(app=app)
@@ -1497,7 +1616,7 @@ async def test_get_my_following_success():
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
          patch("backend.main.get_following", new_callable=lambda: AsyncMock(return_value={
-             "users": [{"id": "user-2", "first_name": "F2", "last_name": "L2", "run_notifications_enabled": True}],
+             "users": [{"user_id": "user-2", "display_name": "F2", "run_notifications_enabled": True, "avatar_url": None, "city": None, "club_name": None}],
              "next_cursor": None,
          })):
         transport = ASGITransport(app=app)

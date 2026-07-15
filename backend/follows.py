@@ -1,3 +1,5 @@
+import base64
+import json
 import logging
 from datetime import datetime
 from typing import Optional
@@ -6,6 +8,22 @@ from uuid import UUID
 from .database import get_db_pool
 
 logger = logging.getLogger(__name__)
+
+
+def encode_cursor(created_at: datetime, user_id: UUID) -> str:
+    """Encode a cursor as URL-safe base64 JSON."""
+    data = {"ts": created_at.isoformat(), "uid": str(user_id)}
+    return base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
+
+
+def decode_cursor(cursor: str) -> dict:
+    """Decode a base64 cursor. Raises ValueError on invalid input."""
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode())
+        data = json.loads(raw)
+        return {"ts": datetime.fromisoformat(data["ts"]), "uid": UUID(data["uid"])}
+    except Exception:
+        raise ValueError("Invalid cursor")
 
 
 async def follow_user(follower_id: UUID, following_id: UUID) -> bool:
@@ -24,11 +42,11 @@ async def follow_user(follower_id: UUID, following_id: UUID) -> bool:
         return result == "INSERT 0 1" or "INSERT" in result
 
 
-async def unfollow_user(follower_id: UUID, following_id: UUID) -> bool:
-    """Unfollow a user. Returns True if successfully unfollowed."""
+async def unfollow_user(follower_id: UUID, following_id: UUID) -> None:
+    """Unfollow a user. Idempotent."""
     pool = get_db_pool()
     async with pool.acquire() as conn:
-        result = await conn.execute(
+        await conn.execute(
             """
             DELETE FROM public.follows
             WHERE follower_id = $1 AND following_id = $2
@@ -36,7 +54,6 @@ async def unfollow_user(follower_id: UUID, following_id: UUID) -> bool:
             follower_id,
             following_id,
         )
-        return result == "DELETE 1"
 
 
 async def is_following(follower_id: UUID, following_id: UUID) -> bool:
@@ -56,57 +73,36 @@ async def is_following(follower_id: UUID, following_id: UUID) -> bool:
         return bool(row)
 
 
-async def is_profile_public(user_id: UUID) -> bool:
-    """Check if a user's profile is public."""
-    pool = get_db_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchval(
-            """
-            SELECT EXISTS(
-                SELECT 1 FROM public.profiles
-                WHERE user_id = $1 AND is_public = true
-            )
-            """,
-            user_id,
-        )
-        return bool(row)
-
-
 async def get_followers(
-    user_id: UUID, limit: int = 20, cursor: Optional[datetime] = None,
+    user_id: UUID, limit: int = 20, cursor: Optional[str] = None,
 ) -> dict:
-    """Get followers with cursor pagination.
-
-    Returns {"users": [...], "next_cursor": ... | None}.
-    """
+    """Get followers with composite cursor pagination."""
     pool = get_db_pool()
     async with pool.acquire() as conn:
         if cursor:
+            c = decode_cursor(cursor)
             rows = await conn.fetch(
                 """
-                SELECT u.id, u.first_name, u.last_name, u.telegram_photo_url,
-                       p.display_name, p.avatar_url, p.city,
-                       f.created_at AS followed_at
+                SELECT f.follower_id AS user_id, f.created_at,
+                       p.display_name, p.avatar_url, p.city, p.club_name
                 FROM public.follows f
-                JOIN public.users u ON u.id = f.follower_id
-                LEFT JOIN public.profiles p ON p.user_id = u.id
-                WHERE f.following_id = $1 AND f.created_at < $2
-                ORDER BY f.created_at DESC
-                LIMIT $3
+                JOIN public.profiles p ON p.user_id = f.follower_id AND p.is_public = true
+                WHERE f.following_id = $1
+                  AND (f.created_at, f.follower_id) < ($2, $3)
+                ORDER BY f.created_at DESC, f.follower_id DESC
+                LIMIT $4
                 """,
-                user_id, cursor, limit + 1,
+                user_id, c["ts"], c["uid"], limit + 1,
             )
         else:
             rows = await conn.fetch(
                 """
-                SELECT u.id, u.first_name, u.last_name, u.telegram_photo_url,
-                       p.display_name, p.avatar_url, p.city,
-                       f.created_at AS followed_at
+                SELECT f.follower_id AS user_id, f.created_at,
+                       p.display_name, p.avatar_url, p.city, p.club_name
                 FROM public.follows f
-                JOIN public.users u ON u.id = f.follower_id
-                LEFT JOIN public.profiles p ON p.user_id = u.id
+                JOIN public.profiles p ON p.user_id = f.follower_id AND p.is_public = true
                 WHERE f.following_id = $1
-                ORDER BY f.created_at DESC
+                ORDER BY f.created_at DESC, f.follower_id DESC
                 LIMIT $2
                 """,
                 user_id, limit + 1,
@@ -114,47 +110,45 @@ async def get_followers(
 
     has_more = len(rows) > limit
     items = [dict(r) for r in rows[:limit]]
-    next_cursor = items[-1]["followed_at"] if has_more and items else None
+    next_cursor = None
+    if has_more and items:
+        last = items[-1]
+        next_cursor = encode_cursor(last["created_at"], last["user_id"])
     return {"users": items, "next_cursor": next_cursor}
 
 
 async def get_following(
-    user_id: UUID, limit: int = 20, cursor: Optional[datetime] = None,
+    user_id: UUID, limit: int = 20, cursor: Optional[str] = None,
 ) -> dict:
-    """Get following with cursor pagination.
-
-    Returns {"users": [...], "next_cursor": ... | None}.
-    """
+    """Get following with composite cursor pagination."""
     pool = get_db_pool()
     async with pool.acquire() as conn:
         if cursor:
+            c = decode_cursor(cursor)
             rows = await conn.fetch(
                 """
-                SELECT u.id, u.first_name, u.last_name, u.telegram_photo_url,
-                       p.display_name, p.avatar_url, p.city,
+                SELECT f.following_id AS user_id, f.created_at,
                        f.run_notifications_enabled,
-                       f.created_at AS followed_at
+                       p.display_name, p.avatar_url, p.city, p.club_name
                 FROM public.follows f
-                JOIN public.users u ON u.id = f.following_id
-                LEFT JOIN public.profiles p ON p.user_id = u.id
-                WHERE f.follower_id = $1 AND f.created_at < $2
-                ORDER BY f.created_at DESC
-                LIMIT $3
+                JOIN public.profiles p ON p.user_id = f.following_id AND p.is_public = true
+                WHERE f.follower_id = $1
+                  AND (f.created_at, f.following_id) < ($2, $3)
+                ORDER BY f.created_at DESC, f.following_id DESC
+                LIMIT $4
                 """,
-                user_id, cursor, limit + 1,
+                user_id, c["ts"], c["uid"], limit + 1,
             )
         else:
             rows = await conn.fetch(
                 """
-                SELECT u.id, u.first_name, u.last_name, u.telegram_photo_url,
-                       p.display_name, p.avatar_url, p.city,
+                SELECT f.following_id AS user_id, f.created_at,
                        f.run_notifications_enabled,
-                       f.created_at AS followed_at
+                       p.display_name, p.avatar_url, p.city, p.club_name
                 FROM public.follows f
-                JOIN public.users u ON u.id = f.following_id
-                LEFT JOIN public.profiles p ON p.user_id = u.id
+                JOIN public.profiles p ON p.user_id = f.following_id AND p.is_public = true
                 WHERE f.follower_id = $1
-                ORDER BY f.created_at DESC
+                ORDER BY f.created_at DESC, f.following_id DESC
                 LIMIT $2
                 """,
                 user_id, limit + 1,
@@ -162,7 +156,10 @@ async def get_following(
 
     has_more = len(rows) > limit
     items = [dict(r) for r in rows[:limit]]
-    next_cursor = items[-1]["followed_at"] if has_more and items else None
+    next_cursor = None
+    if has_more and items:
+        last = items[-1]
+        next_cursor = encode_cursor(last["created_at"], last["user_id"])
     return {"users": items, "next_cursor": next_cursor}
 
 
@@ -184,7 +181,7 @@ async def get_follow_counts(user_id: UUID) -> dict:
 async def set_run_notifications(
     follower_id: UUID, following_id: UUID, enabled: bool,
 ) -> bool:
-    """Toggle run notifications for a specific follow relationship."""
+    """Toggle run notifications. Returns True if the follow relationship exists."""
     pool = get_db_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
@@ -200,8 +197,8 @@ async def set_run_notifications(
         return result == "UPDATE 1"
 
 
-async def get_run_notifications_enabled(follower_id: UUID, following_id: UUID) -> bool:
-    """Check if run notifications are enabled for this follow relationship."""
+async def get_run_notifications_enabled(follower_id: UUID, following_id: UUID) -> Optional[bool]:
+    """Get run notifications state. Returns None if no follow relationship."""
     pool = get_db_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchval(
@@ -212,4 +209,4 @@ async def get_run_notifications_enabled(follower_id: UUID, following_id: UUID) -
             follower_id,
             following_id,
         )
-    return bool(row) if row is not None else True
+    return bool(row) if row is not None else None
