@@ -224,12 +224,17 @@ async def test_put_profile_rejects_user_id():
 
 
 @pytest.mark.asyncio
-async def test_put_profile_rejects_is_public():
+async def test_put_profile_accepts_is_public():
     _clear_rate_limit()
     from backend.main import app
     init_data = _make_init_data()
 
-    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.upsert_profile", new_callable=lambda: AsyncMock(return_value={
+             "display_name": "X", "bio": None, "city": None, "club_name": None,
+             "avatar_url": None, "social_links": {}, "is_public": True,
+         })):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.put(
@@ -237,7 +242,8 @@ async def test_put_profile_rejects_is_public():
                 json={"display_name": "X", "is_public": True},
                 headers={"X-Telegram-Init-Data": init_data},
             )
-        assert resp.status_code == 422
+        assert resp.status_code == 200
+        assert resp.json()["profile"]["is_public"] is True
 
 
 @pytest.mark.asyncio

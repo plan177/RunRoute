@@ -77,6 +77,7 @@ class ProfileUpdateRequest(BaseModel):
     club_name: Optional[str] = None
     avatar_url: Optional[str] = None
     social_links: Optional[SocialLinks] = None
+    is_public: Optional[bool] = None
 
     @field_validator("display_name")
     @classmethod

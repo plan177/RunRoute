@@ -72,30 +72,56 @@ async def upsert_profile(
     club_name: Optional[str],
     avatar_url: Optional[str],
     social_links: Optional[dict],
+    is_public: Optional[bool] = None,
 ) -> dict:
     pool = get_db_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO public.profiles (user_id, display_name, bio, city, club_name, avatar_url, social_links)
-            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-            ON CONFLICT (user_id) DO UPDATE SET
-                display_name = EXCLUDED.display_name,
-                bio = EXCLUDED.bio,
-                city = EXCLUDED.city,
-                club_name = EXCLUDED.club_name,
-                avatar_url = EXCLUDED.avatar_url,
-                social_links = EXCLUDED.social_links
-            RETURNING display_name, bio, city, club_name, avatar_url, social_links, is_public
-            """,
-            user_id,
-            display_name,
-            bio,
-            city,
-            club_name,
-            avatar_url,
-            json.dumps(social_links or {}),
-        )
+        if is_public is not None:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO public.profiles (user_id, display_name, bio, city, club_name, avatar_url, social_links, is_public)
+                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    display_name = EXCLUDED.display_name,
+                    bio = EXCLUDED.bio,
+                    city = EXCLUDED.city,
+                    club_name = EXCLUDED.club_name,
+                    avatar_url = EXCLUDED.avatar_url,
+                    social_links = EXCLUDED.social_links,
+                    is_public = EXCLUDED.is_public
+                RETURNING display_name, bio, city, club_name, avatar_url, social_links, is_public
+                """,
+                user_id,
+                display_name,
+                bio,
+                city,
+                club_name,
+                avatar_url,
+                json.dumps(social_links or {}),
+                is_public,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO public.profiles (user_id, display_name, bio, city, club_name, avatar_url, social_links)
+                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    display_name = EXCLUDED.display_name,
+                    bio = EXCLUDED.bio,
+                    city = EXCLUDED.city,
+                    club_name = EXCLUDED.club_name,
+                    avatar_url = EXCLUDED.avatar_url,
+                    social_links = EXCLUDED.social_links
+                RETURNING display_name, bio, city, club_name, avatar_url, social_links, is_public
+                """,
+                user_id,
+                display_name,
+                bio,
+                city,
+                club_name,
+                avatar_url,
+                json.dumps(social_links or {}),
+            )
     d = dict(row)
     if d["social_links"] is None:
         d["social_links"] = {}

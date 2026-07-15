@@ -13,7 +13,6 @@ from .auth import get_current_telegram_user
 from .users import upsert_user
 from .profiles import get_profile, upsert_profile
 from .models import ProfileUpdateRequest, SavedRouteCreate, SavedRouteRename, PlannedRunCreate, PlannedRunUpdate
-from .models import FollowResponse, MuteResponse
 from .routes import create_saved_route, list_saved_routes, get_saved_route, rename_saved_route, delete_saved_route
 from .calendar import (
     create_planned_run, list_planned_runs, get_planned_run,
@@ -21,8 +20,9 @@ from .calendar import (
 )
 from .profiles import get_profile, get_public_profile, upsert_profile
 from .follows import (
-    follow_user, unfollow_user, is_following, get_followers, get_following, get_follow_counts,
-    mute_author, unmute_author, is_muted, get_muted_authors,
+    follow_user, unfollow_user, is_following, is_profile_public,
+    get_followers, get_following, get_follow_counts,
+    set_run_notifications, get_run_notifications_enabled,
 )
 import uvicorn
 
@@ -175,6 +175,7 @@ async def update_profile_endpoint(
             club_name=request.club_name,
             avatar_url=request.avatar_url,
             social_links=social,
+            is_public=request.is_public,
         )
         return {"user": user, "profile": profile}
     except Exception:
@@ -547,6 +548,18 @@ async def send_feedback(request: FeedbackRequest):
 # --- Public profiles and follows ---
 
 
+def _sanitize_user(user: dict) -> dict:
+    """Remove Telegram-specific fields from user data for public responses."""
+    return {
+        "id": user["id"],
+        "first_name": user.get("first_name", ""),
+        "last_name": user.get("last_name", ""),
+        "display_name": user.get("display_name"),
+        "avatar_url": user.get("avatar_url"),
+        "city": user.get("city"),
+    }
+
+
 @app.get("/api/users/{user_id}/profile")
 async def get_user_profile(
     user_id: str,
@@ -567,12 +580,12 @@ async def get_user_profile(
         if profile is None:
             raise HTTPException(status_code=404, detail="Profile not found or not public")
         following = await is_following(me["id"], target_id)
-        muted = await is_muted(me["id"], target_id)
+        run_notifs = await get_run_notifications_enabled(me["id"], target_id) if following else True
         counts = await get_follow_counts(target_id)
         return {
-            "profile": profile,
+            "profile": _sanitize_user(profile),
             "is_following": following,
-            "is_muted": muted,
+            "run_notifications_enabled": run_notifs,
             "followers_count": counts["followers_count"],
             "following_count": counts["following_count"],
         }
@@ -601,6 +614,9 @@ async def follow_user_endpoint(
         )
         if str(me["id"]) == str(target_id):
             raise HTTPException(status_code=400, detail="Cannot follow yourself")
+        public = await is_profile_public(target_id)
+        if not public:
+            raise HTTPException(status_code=404, detail="Profile not found or not public")
         await follow_user(me["id"], target_id)
         return {"success": True, "is_following": True}
     except HTTPException:
@@ -635,15 +651,16 @@ async def unfollow_user_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@app.get("/api/users/{user_id}/followers")
-async def get_followers_endpoint(
+@app.post("/api/users/{user_id}/notifications")
+async def set_notifications_endpoint(
     user_id: str,
+    request: dict,
     telegram_user: dict = Depends(get_current_telegram_user),
 ):
     try:
         from uuid import UUID
         target_id = UUID(user_id)
-        await upsert_user(
+        me = await upsert_user(
             telegram_user_id=telegram_user["id"],
             username=telegram_user.get("username"),
             first_name=telegram_user.get("first_name", ""),
@@ -651,8 +668,36 @@ async def get_followers_endpoint(
             language_code=telegram_user.get("language_code"),
             photo_url=telegram_user.get("photo_url"),
         )
-        followers = await get_followers(target_id)
-        return {"followers": followers}
+        enabled = request.get("enabled", True)
+        await set_run_notifications(me["id"], target_id, enabled)
+        return {"success": True, "run_notifications_enabled": enabled}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to set notifications")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/me/followers")
+async def get_my_followers(
+    telegram_user: dict = Depends(get_current_telegram_user),
+    cursor: str = Query(None),
+    limit: int = Query(20, ge=1, le=50),
+):
+    try:
+        from dateutil.parser import isoparse
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        cursor_dt = isoparse(cursor) if cursor else None
+        result = await get_followers(me["id"], limit=limit, cursor=cursor_dt)
+        users = [_sanitize_user(u) for u in result["users"]]
+        return {"users": users, "next_cursor": str(result["next_cursor"]) if result["next_cursor"] else None}
     except HTTPException:
         raise
     except Exception:
@@ -660,15 +705,15 @@ async def get_followers_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@app.get("/api/users/{user_id}/following")
-async def get_following_endpoint(
-    user_id: str,
+@app.get("/api/me/following")
+async def get_my_following(
     telegram_user: dict = Depends(get_current_telegram_user),
+    cursor: str = Query(None),
+    limit: int = Query(20, ge=1, le=50),
 ):
     try:
-        from uuid import UUID
-        target_id = UUID(user_id)
-        await upsert_user(
+        from dateutil.parser import isoparse
+        me = await upsert_user(
             telegram_user_id=telegram_user["id"],
             username=telegram_user.get("username"),
             first_name=telegram_user.get("first_name", ""),
@@ -676,64 +721,18 @@ async def get_following_endpoint(
             language_code=telegram_user.get("language_code"),
             photo_url=telegram_user.get("photo_url"),
         )
-        following = await get_following(target_id)
-        return {"following": following}
+        cursor_dt = isoparse(cursor) if cursor else None
+        result = await get_following(me["id"], limit=limit, cursor=cursor_dt)
+        users = []
+        for u in result["users"]:
+            sanitized = _sanitize_user(u)
+            sanitized["run_notifications_enabled"] = u.get("run_notifications_enabled", True)
+            users.append(sanitized)
+        return {"users": users, "next_cursor": str(result["next_cursor"]) if result["next_cursor"] else None}
     except HTTPException:
         raise
     except Exception:
         logger.error("Failed to fetch following")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@app.post("/api/users/{user_id}/mute")
-async def mute_user_endpoint(
-    user_id: str,
-    telegram_user: dict = Depends(get_current_telegram_user),
-):
-    try:
-        from uuid import UUID
-        target_id = UUID(user_id)
-        me = await upsert_user(
-            telegram_user_id=telegram_user["id"],
-            username=telegram_user.get("username"),
-            first_name=telegram_user.get("first_name", ""),
-            last_name=telegram_user.get("last_name", ""),
-            language_code=telegram_user.get("language_code"),
-            photo_url=telegram_user.get("photo_url"),
-        )
-        if str(me["id"]) == str(target_id):
-            raise HTTPException(status_code=400, detail="Cannot mute yourself")
-        await mute_author(me["id"], target_id)
-        return {"success": True, "is_muted": True}
-    except HTTPException:
-        raise
-    except Exception:
-        logger.error("Failed to mute user")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@app.delete("/api/users/{user_id}/mute")
-async def unmute_user_endpoint(
-    user_id: str,
-    telegram_user: dict = Depends(get_current_telegram_user),
-):
-    try:
-        from uuid import UUID
-        target_id = UUID(user_id)
-        me = await upsert_user(
-            telegram_user_id=telegram_user["id"],
-            username=telegram_user.get("username"),
-            first_name=telegram_user.get("first_name", ""),
-            last_name=telegram_user.get("last_name", ""),
-            language_code=telegram_user.get("language_code"),
-            photo_url=telegram_user.get("photo_url"),
-        )
-        await unmute_author(me["id"], target_id)
-        return {"success": True, "is_muted": False}
-    except HTTPException:
-        raise
-    except Exception:
-        logger.error("Failed to unmute user")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

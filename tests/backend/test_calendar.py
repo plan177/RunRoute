@@ -1280,24 +1280,19 @@ def test_migration_005_creates_follows():
     assert "CREATE TABLE IF NOT EXISTS public.follows" in sql
 
 
-def test_migration_005_creates_muted_run_authors():
+def test_migration_005_has_run_notifications():
     sql = open("backend/migrations/005_public_profiles_and_follows.sql").read()
-    assert "CREATE TABLE IF NOT EXISTS public.muted_run_authors" in sql
+    assert "run_notifications_enabled" in sql
 
 
 def test_migration_005_rls_enabled():
     sql = open("backend/migrations/005_public_profiles_and_follows.sql").read()
-    assert sql.count("ENABLE ROW LEVEL SECURITY") >= 2
+    assert "ENABLE ROW LEVEL SECURITY" in sql
 
 
 def test_migration_005_self_follow_prevented():
     sql = open("backend/migrations/005_public_profiles_and_follows.sql").read()
     assert "CHECK (follower_id <> following_id)" in sql
-
-
-def test_migration_005_self_mute_prevented():
-    sql = open("backend/migrations/005_public_profiles_and_follows.sql").read()
-    assert "CHECK (user_id <> muted_user_id)" in sql
 
 
 # --- Follows API tests ---
@@ -1334,6 +1329,25 @@ async def test_follow_user_self():
 
 
 @pytest.mark.asyncio
+async def test_follow_user_private_profile():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.is_profile_public", new_callable=lambda: AsyncMock(return_value=False)):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/users/00000000-0000-0000-0000-000000000099/follow",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 404
+        assert "not public" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_follow_user_success():
     _clear_rate_limit()
     from backend.main import app
@@ -1341,6 +1355,7 @@ async def test_follow_user_success():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.is_profile_public", new_callable=lambda: AsyncMock(return_value=True)), \
          patch("backend.main.follow_user", new_callable=lambda: AsyncMock(return_value=True)):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -1372,59 +1387,23 @@ async def test_unfollow_user_success():
 
 
 @pytest.mark.asyncio
-async def test_mute_user_self():
-    _clear_rate_limit()
-    from backend.main import app
-    init_data = _make_init_data()
-
-    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
-         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post(
-                "/api/users/00000000-0000-0000-0000-000000000001/mute",
-                headers={"X-Telegram-Init-Data": init_data},
-            )
-        assert resp.status_code == 400
-        assert "Cannot mute yourself" in resp.json()["detail"]
-
-
-@pytest.mark.asyncio
-async def test_mute_user_success():
+async def test_set_notifications_success():
     _clear_rate_limit()
     from backend.main import app
     init_data = _make_init_data()
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.mute_author", new_callable=lambda: AsyncMock(return_value=True)):
+         patch("backend.main.set_run_notifications", new_callable=lambda: AsyncMock(return_value=True)):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
-                "/api/users/00000000-0000-0000-0000-000000000099/mute",
+                "/api/users/00000000-0000-0000-0000-000000000099/notifications",
+                json={"enabled": False},
                 headers={"X-Telegram-Init-Data": init_data},
             )
         assert resp.status_code == 200
-        assert resp.json()["is_muted"] is True
-
-
-@pytest.mark.asyncio
-async def test_unmute_user_success():
-    _clear_rate_limit()
-    from backend.main import app
-    init_data = _make_init_data()
-
-    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
-         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.unmute_author", new_callable=lambda: AsyncMock(return_value=True)):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.delete(
-                "/api/users/00000000-0000-0000-0000-000000000099/mute",
-                headers={"X-Telegram-Init-Data": init_data},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["is_muted"] is False
+        assert resp.json()["run_notifications_enabled"] is False
 
 
 @pytest.mark.asyncio
@@ -1446,7 +1425,7 @@ async def test_get_public_profile_not_found():
 
 
 @pytest.mark.asyncio
-async def test_get_public_profile_success():
+async def test_get_public_profile_no_telegram_fields():
     _clear_rate_limit()
     from backend.main import app
     init_data = _make_init_data()
@@ -1458,13 +1437,14 @@ async def test_get_public_profile_success():
              "telegram_username": "runner",
              "first_name": "Runner",
              "last_name": "User",
+             "telegram_photo_url": "https://t.me/photo",
              "display_name": "Pro Runner",
              "bio": "I run",
              "city": "Moscow",
              "is_public": True,
          })), \
          patch("backend.main.is_following", new_callable=lambda: AsyncMock(return_value=False)), \
-         patch("backend.main.is_muted", new_callable=lambda: AsyncMock(return_value=False)), \
+         patch("backend.main.get_run_notifications_enabled", new_callable=lambda: AsyncMock(return_value=True)), \
          patch("backend.main.get_follow_counts", new_callable=lambda: AsyncMock(return_value={
              "followers_count": 5, "following_count": 3,
          })):
@@ -1476,48 +1456,56 @@ async def test_get_public_profile_success():
             )
         assert resp.status_code == 200
         data = resp.json()
+        profile = data["profile"]
+        assert "telegram_username" not in profile
+        assert "telegram_photo_url" not in profile
+        assert profile["first_name"] == "Runner"
         assert data["is_following"] is False
         assert data["followers_count"] == 5
         assert data["following_count"] == 3
 
 
 @pytest.mark.asyncio
-async def test_get_followers_success():
+async def test_get_my_followers_success():
     _clear_rate_limit()
     from backend.main import app
     init_data = _make_init_data()
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_followers", new_callable=lambda: AsyncMock(return_value=[
-             {"id": "user-1", "telegram_username": "follower1", "first_name": "F1", "last_name": "L1"},
-         ])):
+         patch("backend.main.get_followers", new_callable=lambda: AsyncMock(return_value={
+             "users": [{"id": "user-1", "first_name": "F1", "last_name": "L1"}],
+             "next_cursor": None,
+         })):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get(
-                "/api/users/00000000-0000-0000-0000-000000000001/followers",
+                "/api/me/followers",
                 headers={"X-Telegram-Init-Data": init_data},
             )
         assert resp.status_code == 200
-        assert len(resp.json()["followers"]) == 1
+        assert len(resp.json()["users"]) == 1
+        assert resp.json()["next_cursor"] is None
 
 
 @pytest.mark.asyncio
-async def test_get_following_success():
+async def test_get_my_following_success():
     _clear_rate_limit()
     from backend.main import app
     init_data = _make_init_data()
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_following", new_callable=lambda: AsyncMock(return_value=[
-             {"id": "user-2", "telegram_username": "followed1", "first_name": "F2", "last_name": "L2"},
-         ])):
+         patch("backend.main.get_following", new_callable=lambda: AsyncMock(return_value={
+             "users": [{"id": "user-2", "first_name": "F2", "last_name": "L2", "run_notifications_enabled": True}],
+             "next_cursor": None,
+         })):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get(
-                "/api/users/00000000-0000-0000-0000-000000000001/following",
+                "/api/me/following",
                 headers={"X-Telegram-Init-Data": init_data},
             )
         assert resp.status_code == 200
-        assert len(resp.json()["following"]) == 1
+        assert len(resp.json()["users"]) == 1
+        assert resp.json()["users"][0]["run_notifications_enabled"] is True
