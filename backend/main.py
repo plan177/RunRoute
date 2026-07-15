@@ -12,7 +12,7 @@ from .config import get_settings
 from .database import init_db_pool, close_db_pool, check_database_connection
 from .auth import get_current_telegram_user
 from .users import upsert_user
-from .profiles import get_profile, get_public_profile, upsert_profile, user_exists
+from .profiles import get_profile, get_profile_with_counts, get_public_profile, update_profile_fields, user_exists
 from .models import ProfileUpdateRequest, SavedRouteCreate, SavedRouteRename, PlannedRunCreate, PlannedRunUpdate
 from .models import FollowNotificationsUpdate
 from .routes import create_saved_route, list_saved_routes, get_saved_route, rename_saved_route, delete_saved_route
@@ -128,7 +128,7 @@ async def get_me(telegram_user: dict = Depends(get_current_telegram_user)):
             language_code=telegram_user.get("language_code"),
             photo_url=telegram_user.get("photo_url"),
         )
-        profile = await get_profile(user["id"])
+        profile = await get_profile_with_counts(user["id"])
         return {"user": user, "profile": profile}
     except Exception:
         logger.error("Failed to synchronize current user")
@@ -146,7 +146,7 @@ async def get_profile_endpoint(telegram_user: dict = Depends(get_current_telegra
             language_code=telegram_user.get("language_code"),
             photo_url=telegram_user.get("photo_url"),
         )
-        profile = await get_profile(user["id"])
+        profile = await get_profile_with_counts(user["id"])
         return {"user": user, "profile": profile}
     except Exception:
         logger.error("Failed to fetch profile")
@@ -167,17 +167,11 @@ async def update_profile_endpoint(
             language_code=telegram_user.get("language_code"),
             photo_url=telegram_user.get("photo_url"),
         )
-        social = request.social_links.model_dump() if request.social_links else {}
-        profile = await upsert_profile(
-            user_id=user["id"],
-            display_name=request.display_name,
-            bio=request.bio,
-            city=request.city,
-            club_name=request.club_name,
-            avatar_url=request.avatar_url,
-            social_links=social,
-            is_public=request.is_public,
-        )
+        fields = request.model_dump(exclude_unset=True)
+        # Convert social_links to dict if present
+        if "social_links" in fields and fields["social_links"] is not None:
+            fields["social_links"] = fields["social_links"].model_dump()
+        profile = await update_profile_fields(user_id=user["id"], fields=fields)
         return {"user": user, "profile": profile}
     except Exception:
         logger.error("Failed to update profile")
@@ -696,7 +690,11 @@ async def get_my_followers(
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid cursor")
         result = await get_followers(me["id"], limit=limit, cursor=cursor)
-        return {"users": result["users"], "next_cursor": result["next_cursor"]}
+        users = [
+            {k: v for k, v in u.items() if k in {"user_id", "display_name", "avatar_url", "city", "club_name"}}
+            for u in result["users"]
+        ]
+        return {"users": users, "next_cursor": result["next_cursor"]}
     except HTTPException:
         raise
     except Exception:
@@ -725,7 +723,12 @@ async def get_my_following(
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid cursor")
         result = await get_following(me["id"], limit=limit, cursor=cursor)
-        return {"users": result["users"], "next_cursor": result["next_cursor"]}
+        allowed_keys = {"user_id", "display_name", "avatar_url", "city", "club_name", "run_notifications_enabled"}
+        users = [
+            {k: v for k, v in u.items() if k in allowed_keys}
+            for u in result["users"]
+        ]
+        return {"users": users, "next_cursor": result["next_cursor"]}
     except HTTPException:
         raise
     except Exception:

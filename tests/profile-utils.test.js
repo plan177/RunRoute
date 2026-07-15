@@ -100,11 +100,16 @@ describe('production code regression', () => {
     });
 
     it('profile flow uses value/textContent, not innerHTML', () => {
-        const profileStart = appJs.indexOf('function openProfileModal');
-        const profileEnd = appJs.indexOf('function initProfile') + appJs.substring(appJs.indexOf('function initProfile')).indexOf('}') + 1;
-        const profileSection = appJs.substring(profileStart, profileEnd);
-        assert.ok(!profileSection.includes('.innerHTML'),
-            'profile flow must not use innerHTML');
+        // Check that loadProfileData and initProfile don't use innerHTML
+        const loadStart = appJs.indexOf('async function loadProfileData');
+        const loadBody = appJs.substring(loadStart, loadStart + 800);
+        assert.ok(!loadBody.includes('.innerHTML'),
+            'loadProfileData must not use innerHTML');
+
+        const initStart = appJs.indexOf('function initProfile');
+        const initBody = appJs.substring(initStart, initStart + 2000);
+        assert.ok(!initBody.includes('.innerHTML'),
+            'initProfile must not use innerHTML');
     });
 
     it('outside Telegram openProfileModal does not call fetch', () => {

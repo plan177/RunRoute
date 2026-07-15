@@ -27,7 +27,7 @@ def decode_cursor(cursor: str) -> dict:
 
 
 async def follow_user(follower_id: UUID, following_id: UUID) -> bool:
-    """Follow a user. Returns True if successfully followed."""
+    """Follow a user. Returns True if a new follow was created, False if already following."""
     pool = get_db_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
@@ -39,7 +39,7 @@ async def follow_user(follower_id: UUID, following_id: UUID) -> bool:
             follower_id,
             following_id,
         )
-        return result == "INSERT 0 1" or "INSERT" in result
+        return result == "INSERT 0 1"
 
 
 async def unfollow_user(follower_id: UUID, following_id: UUID) -> None:

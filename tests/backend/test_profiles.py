@@ -111,7 +111,7 @@ async def test_get_profile_valid_upserts_user():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_profile", new_callable=lambda: AsyncMock(return_value=_mock_profile())):
+         patch("backend.main.get_profile_with_counts", new_callable=lambda: AsyncMock(return_value=_mock_profile())):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/api/profile", headers={"X-Telegram-Init-Data": init_data})
@@ -130,7 +130,7 @@ async def test_get_profile_missing_returns_empty():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_profile", new_callable=lambda: AsyncMock(return_value={
+         patch("backend.main.get_profile_with_counts", new_callable=lambda: AsyncMock(return_value={
              "display_name": None, "bio": None, "city": None, "club_name": None,
              "avatar_url": None, "social_links": {}, "is_public": False,
          })):
@@ -168,7 +168,7 @@ async def test_put_profile_updates_current_user():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.upsert_profile", new_callable=lambda: AsyncMock(return_value=updated_profile)) as mock_upsert:
+         patch("backend.main.update_profile_fields", new_callable=lambda: AsyncMock(return_value=updated_profile)) as mock_update:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.put(
@@ -180,7 +180,7 @@ async def test_put_profile_updates_current_user():
         assert resp.status_code == 200
         body = resp.json()
         assert body["profile"]["display_name"] == "Updated"
-        call_kwargs = mock_upsert.call_args[1]
+        call_kwargs = mock_update.call_args[1]
         assert call_kwargs["user_id"] == _mock_user()["id"]
 
 
@@ -192,7 +192,7 @@ async def test_put_profile_sql_uses_parameters():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.upsert_profile", new_callable=lambda: AsyncMock(return_value=_mock_profile())) as mock_upsert:
+         patch("backend.main.update_profile_fields", new_callable=lambda: AsyncMock(return_value=_mock_profile())) as mock_update:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             await client.put(
@@ -201,9 +201,11 @@ async def test_put_profile_sql_uses_parameters():
                 headers={"X-Telegram-Init-Data": init_data},
             )
 
-        call_kwargs = mock_upsert.call_args[1]
-        assert call_kwargs["display_name"] == "Test"
-        assert call_kwargs["bio"] == "Bio"
+        call_kwargs = mock_update.call_args[1]
+        assert call_kwargs["user_id"] == _mock_user()["id"]
+        assert "display_name" in call_kwargs["fields"]
+        assert call_kwargs["fields"]["display_name"] == "Test"
+        assert call_kwargs["fields"]["bio"] == "Bio"
 
 
 @pytest.mark.asyncio
@@ -231,7 +233,7 @@ async def test_put_profile_accepts_is_public():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.upsert_profile", new_callable=lambda: AsyncMock(return_value={
+         patch("backend.main.update_profile_fields", new_callable=lambda: AsyncMock(return_value={
              "display_name": "X", "bio": None, "city": None, "club_name": None,
              "avatar_url": None, "social_links": {}, "is_public": True,
          })):
@@ -305,7 +307,7 @@ async def test_put_profile_empty_strings_normalize_to_null():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.upsert_profile", new_callable=lambda: AsyncMock(return_value=_mock_profile())) as mock_upsert:
+         patch("backend.main.update_profile_fields", new_callable=lambda: AsyncMock(return_value=_mock_profile())) as mock_update:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.put(
@@ -315,9 +317,9 @@ async def test_put_profile_empty_strings_normalize_to_null():
             )
 
         assert resp.status_code == 200
-        call_kwargs = mock_upsert.call_args[1]
-        assert call_kwargs["display_name"] is None
-        assert call_kwargs["bio"] is None
+        call_kwargs = mock_update.call_args[1]
+        assert call_kwargs["fields"]["display_name"] is None
+        assert call_kwargs["fields"]["bio"] is None
 
 
 @pytest.mark.asyncio
@@ -328,13 +330,13 @@ async def test_put_profile_repeated_does_not_duplicate():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.upsert_profile", new_callable=lambda: AsyncMock(return_value=_mock_profile())) as mock_upsert:
+         patch("backend.main.update_profile_fields", new_callable=lambda: AsyncMock(return_value=_mock_profile())) as mock_update:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             await client.put("/api/profile", json={"display_name": "A"}, headers={"X-Telegram-Init-Data": init_data})
             await client.put("/api/profile", json={"display_name": "B"}, headers={"X-Telegram-Init-Data": init_data})
 
-        assert mock_upsert.call_count == 2
+        assert mock_update.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -345,7 +347,7 @@ async def test_put_profile_db_error_returns_safe_500(caplog):
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.upsert_profile", side_effect=Exception("password=secret123 host=db.example.com:5432")):
+         patch("backend.main.update_profile_fields", side_effect=Exception("password=secret123 host=db.example.com:5432")):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.put(
@@ -367,7 +369,7 @@ async def test_get_profile_still_works():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_profile", new_callable=lambda: AsyncMock(return_value=_mock_profile())):
+         patch("backend.main.get_profile_with_counts", new_callable=lambda: AsyncMock(return_value=_mock_profile())):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/api/me", headers={"X-Telegram-Init-Data": init_data})
@@ -397,7 +399,7 @@ async def test_put_profile_valid_https_url():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.upsert_profile", new_callable=lambda: AsyncMock(return_value=_mock_profile())):
+         patch("backend.main.update_profile_fields", new_callable=lambda: AsyncMock(return_value=_mock_profile())):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.put(
@@ -474,3 +476,223 @@ async def test_put_profile_rejects_data_url():
                 headers={"X-Telegram-Init-Data": init_data},
             )
         assert resp.status_code == 422
+
+
+# --- Partial update tests ---
+
+
+@pytest.mark.asyncio
+async def test_partial_update_is_public_does_not_clear_other_fields():
+    """Updating only is_public should not reset display_name, bio, or social_links."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    existing_profile = _mock_profile()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.update_profile_fields", new_callable=lambda: AsyncMock(return_value=existing_profile)) as mock_update:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.put(
+                "/api/profile",
+                json={"is_public": True},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        call_kwargs = mock_update.call_args[1]
+        assert call_kwargs["fields"] == {"is_public": True}
+
+
+@pytest.mark.asyncio
+async def test_partial_update_only_bio():
+    """Updating only bio should pass only bio in fields dict."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    updated = _mock_profile()
+    updated["bio"] = "New bio"
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.update_profile_fields", new_callable=lambda: AsyncMock(return_value=updated)) as mock_update:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.put(
+                "/api/profile",
+                json={"bio": "New bio"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        call_kwargs = mock_update.call_args[1]
+        assert call_kwargs["fields"] == {"bio": "New bio"}
+
+
+@pytest.mark.asyncio
+async def test_partial_update_explicit_null_clears_field():
+    """Sending null for a field should pass it through so the backend clears it."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    updated = _mock_profile()
+    updated["display_name"] = None
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.update_profile_fields", new_callable=lambda: AsyncMock(return_value=updated)) as mock_update:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.put(
+                "/api/profile",
+                json={"display_name": None},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        call_kwargs = mock_update.call_args[1]
+        assert call_kwargs["fields"]["display_name"] is None
+
+
+@pytest.mark.asyncio
+async def test_partial_update_unknown_field_rejected():
+    """Unknown fields should be rejected by Pydantic (422)."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/profile",
+                json={"unknown_field": "value"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_partial_update_new_profile_with_is_public_only():
+    """Creating a new profile with only is_public should work."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.update_profile_fields", new_callable=lambda: AsyncMock(return_value={
+             "display_name": None, "bio": None, "city": None, "club_name": None,
+             "avatar_url": None, "social_links": {}, "is_public": True,
+         })) as mock_update:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/profile",
+                json={"is_public": True},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["profile"]["is_public"] is True
+        call_kwargs = mock_update.call_args[1]
+        assert call_kwargs["fields"] == {"is_public": True}
+
+
+@pytest.mark.asyncio
+async def test_followers_no_created_at():
+    """Followers response should not contain created_at."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    mock_result = {
+        "users": [
+            {
+                "user_id": "00000000-0000-0000-0000-000000000002",
+                "display_name": "Follower1",
+                "avatar_url": None,
+                "city": "Moscow",
+                "club_name": None,
+                "created_at": "2025-01-01T00:00:00",
+            }
+        ],
+        "next_cursor": None,
+    }
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.get_followers", new_callable=lambda: AsyncMock(return_value=mock_result)):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/me/followers",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+        user = resp.json()["users"][0]
+        assert "created_at" not in user
+        assert user["user_id"] == "00000000-0000-0000-0000-000000000002"
+        assert user["display_name"] == "Follower1"
+
+
+@pytest.mark.asyncio
+async def test_following_no_created_at_no_telegram_fields():
+    """Following response should not contain created_at or telegram-specific fields."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    mock_result = {
+        "users": [
+            {
+                "user_id": "00000000-0000-0000-0000-000000000003",
+                "display_name": "Following1",
+                "avatar_url": None,
+                "city": "SPB",
+                "club_name": "Runners",
+                "run_notifications_enabled": True,
+                "created_at": "2025-01-01T00:00:00",
+            }
+        ],
+        "next_cursor": None,
+    }
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.get_following", new_callable=lambda: AsyncMock(return_value=mock_result)):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/me/following",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+        user = resp.json()["users"][0]
+        assert "created_at" not in user
+        assert user["run_notifications_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_followers_next_cursor_works():
+    """next_cursor should be passed through even when created_at is stripped from response."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    mock_result = {
+        "users": [
+            {"user_id": "uuid-2", "display_name": "A", "avatar_url": None,
+             "city": None, "club_name": None, "created_at": "2025-01-01T00:00:00"},
+        ],
+        "next_cursor": "encoded_cursor_value",
+    }
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.get_followers", new_callable=lambda: AsyncMock(return_value=mock_result)):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/me/followers",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["next_cursor"] == "encoded_cursor_value"

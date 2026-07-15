@@ -1721,112 +1721,6 @@ function openProfileModal() {
     loadProfileData();
 }
 
-async function loadProfileData() {
-    const loading = document.getElementById('profile-loading');
-    const form = document.getElementById('profile-form');
-
-    try {
-        const resp = await fetch(apiUrl('/api/profile'), { headers: getApiHeaders() });
-        if (!resp.ok) throw new Error('Failed to load profile');
-
-        const data = await resp.json();
-        const profile = data.profile || {};
-
-        document.getElementById('profile-display-name').value = profile.display_name || '';
-        document.getElementById('profile-bio').value = profile.bio || '';
-        document.getElementById('profile-city').value = profile.city || '';
-        document.getElementById('profile-club-name').value = profile.club_name || '';
-        document.getElementById('profile-avatar-url').value = profile.avatar_url || '';
-
-        const sl = profile.social_links || {};
-        document.getElementById('profile-social-telegram').value = sl.telegram || '';
-        document.getElementById('profile-social-instagram').value = sl.instagram || '';
-        document.getElementById('profile-social-strava').value = sl.strava || '';
-        document.getElementById('profile-social-vk').value = sl.vk || '';
-        document.getElementById('profile-social-website').value = sl.website || '';
-
-        loading.classList.add('hidden');
-        form.classList.remove('hidden');
-    } catch (e) {
-        loading.classList.add('hidden');
-        const status = document.getElementById('profile-status');
-        status.textContent = 'Не удалось загрузить профиль';
-        status.className = 'profile-status error';
-        status.classList.remove('hidden');
-        form.classList.remove('hidden');
-    }
-}
-
-function initProfile() {
-    const modal = document.getElementById('profile-modal');
-    const saveBtn = document.getElementById('profile-save');
-    const cancelBtn = document.getElementById('profile-cancel');
-    const status = document.getElementById('profile-status');
-
-    cancelBtn.addEventListener('click', () => {
-        modal.classList.add('hidden');
-    });
-
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) modal.classList.add('hidden');
-    });
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
-            modal.classList.add('hidden');
-        }
-    });
-
-    saveBtn.addEventListener('click', async () => {
-        if (!isTelegramApp()) return;
-
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'Сохранение...';
-        status.classList.add('hidden');
-
-        const body = {
-            display_name: document.getElementById('profile-display-name').value || null,
-            bio: document.getElementById('profile-bio').value || null,
-            city: document.getElementById('profile-city').value || null,
-            club_name: document.getElementById('profile-club-name').value || null,
-            avatar_url: document.getElementById('profile-avatar-url').value || null,
-            social_links: {
-                telegram: document.getElementById('profile-social-telegram').value || null,
-                instagram: document.getElementById('profile-social-instagram').value || null,
-                strava: document.getElementById('profile-social-strava').value || null,
-                vk: document.getElementById('profile-social-vk').value || null,
-                website: document.getElementById('profile-social-website').value || null,
-            }
-        };
-
-        try {
-            const resp = await fetch(apiUrl('/api/profile'), {
-                method: 'PUT',
-                headers: getApiHeaders(),
-                body: JSON.stringify(body)
-            });
-
-            if (resp.ok) {
-                status.textContent = 'Профиль сохранён';
-                status.className = 'profile-status success';
-                status.classList.remove('hidden');
-            } else {
-                const data = await resp.json().catch(() => ({}));
-                status.textContent = data.detail || 'Ошибка сохранения';
-                status.className = 'profile-status error';
-                status.classList.remove('hidden');
-            }
-        } catch (e) {
-            status.textContent = 'Ошибка сети';
-            status.className = 'profile-status error';
-            status.classList.remove('hidden');
-        } finally {
-            saveBtn.disabled = false;
-            saveBtn.textContent = 'Сохранить';
-        }
-    });
-}
-
 // === Save route ===
 
 function buildSaveRoutePayload() {
@@ -2469,6 +2363,427 @@ function planRunWithRoute(routeId) {
     }
 }
 
+// === Safe DOM helpers ===
+
+function safeSetText(el, text) {
+    el.textContent = text != null ? String(text) : '';
+}
+
+function safeCreateEl(tag, attrs) {
+    const el = document.createElement(tag);
+    if (attrs) {
+        for (const [k, v] of Object.entries(attrs)) {
+            if (k === 'textContent') el.textContent = v;
+            else if (k === 'className') el.className = v;
+            else el.setAttribute(k, v);
+        }
+    }
+    return el;
+}
+
+function safeAvatar(url, size) {
+    const wrap = safeCreateEl('div', { className: 'follow-list-avatar-placeholder' });
+    safeSetText(wrap, '\u{1F3C3}');
+    if (!url) return wrap;
+    const parsed = new URL(url, location.href);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return wrap;
+    const img = safeCreateEl('img', {
+        src: url,
+        alt: '',
+        width: String(size || 40),
+        height: String(size || 40),
+    });
+    img.onerror = function () { img.replaceWith(wrap); };
+    return img;
+}
+
+function safeSocialLink(label, url) {
+    if (!url) return null;
+    let parsed;
+    try { parsed = new URL(url); } catch { return null; }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    const a = safeCreateEl('a', {
+        href: url,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        textContent: label,
+    });
+    return a;
+}
+
+// === Profile: is_public + counters ===
+
+async function loadProfileData() {
+    const loading = document.getElementById('profile-loading');
+    const form = document.getElementById('profile-form');
+
+    try {
+        const resp = await fetch(apiUrl('/api/profile'), { headers: getApiHeaders() });
+        if (!resp.ok) throw new Error('Failed to load profile');
+
+        const data = await resp.json();
+        const profile = data.profile || {};
+
+        document.getElementById('profile-display-name').value = profile.display_name || '';
+        document.getElementById('profile-bio').value = profile.bio || '';
+        document.getElementById('profile-city').value = profile.city || '';
+        document.getElementById('profile-club-name').value = profile.club_name || '';
+        document.getElementById('profile-avatar-url').value = profile.avatar_url || '';
+
+        const sl = profile.social_links || {};
+        document.getElementById('profile-social-telegram').value = sl.telegram || '';
+        document.getElementById('profile-social-instagram').value = sl.instagram || '';
+        document.getElementById('profile-social-strava').value = sl.strava || '';
+        document.getElementById('profile-social-vk').value = sl.vk || '';
+        document.getElementById('profile-social-website').value = sl.website || '';
+
+        document.getElementById('profile-is-public').checked = !!profile.is_public;
+
+        const fc = document.getElementById('profile-followers-count');
+        const fgc = document.getElementById('profile-following-count');
+        if (fc) safeSetText(fc, profile.followers_count != null ? profile.followers_count : 0);
+        if (fgc) safeSetText(fgc, profile.following_count != null ? profile.following_count : 0);
+
+        loading.classList.add('hidden');
+        form.classList.remove('hidden');
+    } catch (e) {
+        loading.classList.add('hidden');
+        const status = document.getElementById('profile-status');
+        safeSetText(status, 'Не удалось загрузить профиль');
+        status.className = 'profile-status error';
+        status.classList.remove('hidden');
+        form.classList.remove('hidden');
+    }
+}
+
+function initProfile() {
+    const modal = document.getElementById('profile-modal');
+    const saveBtn = document.getElementById('profile-save');
+    const cancelBtn = document.getElementById('profile-cancel');
+    const status = document.getElementById('profile-status');
+
+    cancelBtn.addEventListener('click', () => {
+        modal.classList.add('hidden');
+    });
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.classList.add('hidden');
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+            modal.classList.add('hidden');
+        }
+    });
+
+    const followersBtn = document.getElementById('profile-followers-btn');
+    const followingBtn = document.getElementById('profile-following-btn');
+    if (followersBtn) followersBtn.addEventListener('click', () => openFollowList('followers'));
+    if (followingBtn) followingBtn.addEventListener('click', () => openFollowList('following'));
+
+    saveBtn.addEventListener('click', async () => {
+        if (!isTelegramApp()) return;
+
+        saveBtn.disabled = true;
+        safeSetText(saveBtn, 'Сохранение...');
+        status.classList.add('hidden');
+
+        const body = {
+            display_name: document.getElementById('profile-display-name').value || null,
+            bio: document.getElementById('profile-bio').value || null,
+            city: document.getElementById('profile-city').value || null,
+            club_name: document.getElementById('profile-club-name').value || null,
+            avatar_url: document.getElementById('profile-avatar-url').value || null,
+            social_links: {
+                telegram: document.getElementById('profile-social-telegram').value || null,
+                instagram: document.getElementById('profile-social-instagram').value || null,
+                strava: document.getElementById('profile-social-strava').value || null,
+                vk: document.getElementById('profile-social-vk').value || null,
+                website: document.getElementById('profile-social-website').value || null,
+            },
+            is_public: document.getElementById('profile-is-public').checked,
+        };
+
+        try {
+            const resp = await fetch(apiUrl('/api/profile'), {
+                method: 'PUT',
+                headers: getApiHeaders(),
+                body: JSON.stringify(body)
+            });
+
+            if (resp.ok) {
+                const result = await resp.json();
+                const p = result.profile || {};
+                document.getElementById('profile-is-public').checked = !!p.is_public;
+                safeSetText(status, 'Профиль сохранён');
+                status.className = 'profile-status success';
+                status.classList.remove('hidden');
+            } else {
+                const data = await resp.json().catch(() => ({}));
+                safeSetText(status, data.detail || 'Ошибка сохранения');
+                status.className = 'profile-status error';
+                status.classList.remove('hidden');
+            }
+        } catch (e) {
+            safeSetText(status, 'Ошибка сети');
+            status.className = 'profile-status error';
+            status.classList.remove('hidden');
+        } finally {
+            saveBtn.disabled = false;
+            safeSetText(saveBtn, 'Сохранить');
+        }
+    });
+}
+
+// === Public Profile Modal ===
+
+async function openPublicProfile(userId) {
+    const modal = document.getElementById('public-profile-modal');
+    const loading = document.getElementById('public-profile-loading');
+    const content = document.getElementById('public-profile-content');
+    const status = document.getElementById('public-profile-status');
+
+    modal.classList.remove('hidden');
+    loading.classList.remove('hidden');
+    content.classList.add('hidden');
+    status.classList.add('hidden');
+
+    if (!isTelegramApp()) {
+        loading.classList.add('hidden');
+        safeSetText(status, 'Доступно только внутри Telegram');
+        status.className = 'profile-status error';
+        status.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        const resp = await fetch(apiUrl('/api/users/' + userId + '/profile'), { headers: getApiHeaders() });
+        if (!resp.ok) throw new Error(resp.status === 404 ? 'not_found' : 'error');
+
+        const data = await resp.json();
+        const profile = data.profile || {};
+
+        const avatarWrap = document.getElementById('public-profile-avatar-wrap');
+        avatarWrap.innerHTML = '';
+        avatarWrap.appendChild(safeAvatar(profile.avatar_url, 72));
+
+        safeSetText(document.getElementById('public-profile-display-name'), profile.display_name || 'Без имени');
+        safeSetText(document.getElementById('public-profile-bio'), profile.bio || '');
+
+        const meta = document.getElementById('public-profile-meta');
+        meta.innerHTML = '';
+        if (profile.city) {
+            const citySpan = safeCreateEl('span', { className: 'meta-item', textContent: profile.city });
+            meta.appendChild(citySpan);
+        }
+        if (profile.club_name) {
+            const clubSpan = safeCreateEl('span', { className: 'meta-item', textContent: profile.club_name });
+            meta.appendChild(clubSpan);
+        }
+
+        const socialEl = document.getElementById('public-profile-social');
+        socialEl.innerHTML = '';
+        const sl = profile.social_links || {};
+        const socialMap = { telegram: 'Telegram', instagram: 'Instagram', strava: 'Strava', vk: 'VK', website: 'Website' };
+        for (const [key, label] of Object.entries(socialMap)) {
+            const link = safeSocialLink(label, sl[key]);
+            if (link) socialEl.appendChild(link);
+        }
+
+        safeSetText(document.getElementById('public-followers-count'), data.followers_count != null ? data.followers_count : 0);
+        safeSetText(document.getElementById('public-following-count'), data.following_count != null ? data.following_count : 0);
+
+        document.getElementById('public-followers-btn').onclick = () => openFollowList('followers');
+        document.getElementById('public-following-btn').onclick = () => openFollowList('following');
+
+        updatePublicFollowUI(data.is_following, data.run_notifications_enabled, userId);
+
+        loading.classList.add('hidden');
+        content.classList.remove('hidden');
+    } catch (e) {
+        loading.classList.add('hidden');
+        safeSetText(status, e.message === 'not_found' ? 'Профиль не найден' : 'Ошибка загрузки');
+        status.className = 'profile-status error';
+        status.classList.remove('hidden');
+    }
+}
+
+function updatePublicFollowUI(isFollowing, runNotifs, userId) {
+    const followBtn = document.getElementById('public-follow-btn');
+    const notifArea = document.getElementById('public-notifications-area');
+    const notifToggle = document.getElementById('public-notifications-toggle');
+
+    safeSetText(followBtn, isFollowing ? 'Отписаться' : 'Подписаться');
+    followBtn.className = isFollowing ? 'modal-btn secondary' : 'modal-btn primary';
+
+    followBtn.onclick = async () => {
+        if (!isTelegramApp()) return;
+        followBtn.disabled = true;
+        try {
+            const method = isFollowing ? 'DELETE' : 'POST';
+            const resp = await fetch(apiUrl('/api/users/' + userId + '/follow'), {
+                method,
+                headers: getApiHeaders(),
+            });
+            if (resp.ok) {
+                const result = await resp.json();
+                const newFollowing = !isFollowing;
+                updatePublicFollowUI(newFollowing, result.run_notifications_enabled, userId);
+                safeSetText(document.getElementById('public-followers-count'),
+                    result.followers_count != null ? result.followers_count : 0);
+            }
+        } catch (e) {
+            console.error('Follow error:', e);
+        } finally {
+            followBtn.disabled = false;
+        }
+    };
+
+    if (isFollowing && runNotifs !== undefined && runNotifs !== null) {
+        notifArea.classList.remove('hidden');
+        notifToggle.checked = !!runNotifs;
+        notifToggle.onchange = async () => {
+            try {
+                await fetch(apiUrl('/api/users/' + userId + '/follow/notifications'), {
+                    method: 'PUT',
+                    headers: getApiHeaders(),
+                    body: JSON.stringify({ enabled: notifToggle.checked }),
+                });
+            } catch (e) {
+                console.error('Notification toggle error:', e);
+                notifToggle.checked = !notifToggle.checked;
+            }
+        };
+    } else {
+        notifArea.classList.add('hidden');
+    }
+}
+
+function initPublicProfile() {
+    const modal = document.getElementById('public-profile-modal');
+    const closeBtn = document.getElementById('public-profile-close');
+
+    closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) modal.classList.add('hidden');
+    });
+}
+
+// === Follow List Modal ===
+
+let followListMode = null;
+let followListCursor = null;
+let followListSeenIds = new Set();
+
+async function openFollowList(mode) {
+    followListMode = mode;
+    followListCursor = null;
+    followListSeenIds = new Set();
+
+    const modal = document.getElementById('follow-list-modal');
+    const loading = document.getElementById('follow-list-loading');
+    const content = document.getElementById('follow-list-content');
+    const items = document.getElementById('follow-list-items');
+    const empty = document.getElementById('follow-list-empty');
+    const status = document.getElementById('follow-list-status');
+    const loadMore = document.getElementById('follow-list-load-more');
+
+    safeSetText(document.getElementById('follow-list-title'),
+        mode === 'followers' ? 'Подписчики' : 'Подписки');
+
+    items.innerHTML = '';
+    empty.classList.add('hidden');
+    status.classList.add('hidden');
+    loadMore.classList.add('hidden');
+
+    modal.classList.remove('hidden');
+    loading.classList.remove('hidden');
+    content.classList.add('hidden');
+
+    await loadFollowPage();
+}
+
+async function loadFollowPage() {
+    const loading = document.getElementById('follow-list-loading');
+    const content = document.getElementById('follow-list-content');
+    const items = document.getElementById('follow-list-items');
+    const empty = document.getElementById('follow-list-empty');
+    const status = document.getElementById('follow-list-status');
+    const loadMore = document.getElementById('follow-list-load-more');
+
+    const endpoint = followListMode === 'followers' ? '/api/me/followers' : '/api/me/following';
+    let url = apiUrl(endpoint + '?limit=20');
+    if (followListCursor) url += '&cursor=' + encodeURIComponent(followListCursor);
+
+    try {
+        const resp = await fetch(url, { headers: getApiHeaders() });
+        if (!resp.ok) throw new Error(resp.status >= 500 ? 'server' : 'error');
+
+        const data = await resp.json();
+        const users = data.users || [];
+
+        loading.classList.add('hidden');
+        content.classList.remove('hidden');
+
+        if (users.length === 0 && followListSeenIds.size === 0) {
+            empty.classList.remove('hidden');
+            return;
+        }
+
+        for (const user of users) {
+            if (followListSeenIds.has(user.user_id)) continue;
+            followListSeenIds.add(user.user_id);
+            items.appendChild(buildFollowCard(user));
+        }
+
+        followListCursor = data.next_cursor;
+        loadMore.classList.toggle('hidden', !followListCursor);
+    } catch (e) {
+        loading.classList.add('hidden');
+        content.classList.remove('hidden');
+        const messages = { server: 'Сервис временно недоступен' };
+        safeSetText(status, messages[e.message] || 'Не удалось загрузить список');
+        status.className = 'profile-status error';
+        status.classList.remove('hidden');
+    }
+}
+
+function buildFollowCard(user) {
+    const card = safeCreateEl('div', { className: 'follow-list-item' });
+    card.appendChild(safeAvatar(user.avatar_url, 40));
+
+    const info = safeCreateEl('div', { className: 'follow-list-info' });
+    info.appendChild(safeCreateEl('div', { className: 'follow-list-name', textContent: user.display_name || 'Без имени' }));
+    const details = [user.city, user.club_name].filter(Boolean).join(' · ');
+    if (details) info.appendChild(safeCreateEl('div', { className: 'follow-list-detail', textContent: details }));
+    card.appendChild(info);
+
+    if (followListMode === 'following' && user.run_notifications_enabled) {
+        card.appendChild(safeCreateEl('div', { className: 'follow-list-notif', textContent: 'Уведомления' }));
+    }
+
+    card.addEventListener('click', () => {
+        document.getElementById('follow-list-modal').classList.add('hidden');
+        openPublicProfile(user.user_id);
+    });
+
+    return card;
+}
+
+function initFollowList() {
+    const modal = document.getElementById('follow-list-modal');
+    const closeBtn = document.getElementById('follow-list-close');
+    const loadMoreBtn = document.getElementById('follow-list-load-more-btn');
+
+    closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) modal.classList.add('hidden');
+    });
+    loadMoreBtn.addEventListener('click', loadFollowPage);
+}
+
 // === Init all ===
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -2487,6 +2802,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initCalendar();
     initInsertMode();
     initGPS();
+    initPublicProfile();
+    initFollowList();
     loadCurrentUser();
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);

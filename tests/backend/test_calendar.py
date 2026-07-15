@@ -492,7 +492,7 @@ async def test_me_and_profile_still_work():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_profile", new_callable=lambda: AsyncMock(return_value={
+         patch("backend.main.get_profile_with_counts", new_callable=lambda: AsyncMock(return_value={
              "display_name": None, "bio": None, "city": None, "club_name": None,
              "avatar_url": None, "social_links": {}, "is_public": False,
          })):

@@ -1594,3 +1594,251 @@ body {
     display: block;
     margin-top: 4px;
 }
+
+/* Switch / checkbox label */
+.switch-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text);
+}
+
+.switch-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary);
+}
+
+.field-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Profile counts */
+.profile-counts {
+    display: flex;
+    gap: 12px;
+    margin: 12px 0;
+}
+
+.profile-count-btn {
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xs);
+    color: var(--text);
+    padding: 8px 16px;
+    font-size: 14px;
+    cursor: pointer;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.profile-count-btn span {
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.profile-count-btn:hover {
+    background: var(--glass-border);
+}
+
+/* Public profile modal */
+.profile-avatar-wrap {
+    text-align: center;
+    margin-bottom: 12px;
+}
+
+.profile-avatar-wrap img {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--glass-border);
+}
+
+.profile-avatar-placeholder {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: var(--glass);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    color: var(--text-secondary);
+    border: 2px solid var(--glass-border);
+}
+
+.profile-display-name {
+    text-align: center;
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    word-break: break-word;
+}
+
+.profile-bio {
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    word-break: break-word;
+}
+
+.profile-meta {
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.profile-meta .meta-item {
+    display: inline-block;
+    margin: 0 6px;
+}
+
+.profile-social {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.profile-social a {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xs);
+    color: var(--accent);
+    font-size: 12px;
+    text-decoration: none;
+    min-height: 36px;
+}
+
+.profile-social a:hover {
+    background: var(--glass-border);
+}
+
+.profile-follow-area {
+    text-align: center;
+    margin: 12px 0;
+}
+
+.profile-follow-area .modal-btn {
+    min-width: 160px;
+}
+
+.profile-notifications-area {
+    text-align: center;
+    margin: 8px 0 12px;
+}
+
+/* Follow list modal */
+.follow-list-items {
+    max-height: 50vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.follow-list-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--glass-border);
+    cursor: pointer;
+    min-height: 52px;
+}
+
+.follow-list-item:hover {
+    background: var(--glass);
+    margin: 0 -12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-xs);
+}
+
+.follow-list-item:last-child {
+    border-bottom: none;
+}
+
+.follow-list-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.follow-list-avatar-placeholder {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--glass);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.follow-list-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.follow-list-name {
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.follow-list-detail {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.follow-list-notif {
+    font-size: 12px;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.follow-list-empty {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 24px 0;
+    font-size: 14px;
+}
+
+#follow-list-load-more {
+    text-align: center;
+    padding: 12px 0;
+}
+
+/* Safe area support for modals */
+.modal-overlay {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.modal-profile {
+    max-width: calc(100vw - 32px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
