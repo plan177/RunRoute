@@ -13,10 +13,16 @@ from .auth import get_current_telegram_user
 from .users import upsert_user
 from .profiles import get_profile, upsert_profile
 from .models import ProfileUpdateRequest, SavedRouteCreate, SavedRouteRename, PlannedRunCreate, PlannedRunUpdate
+from .models import FollowResponse, MuteResponse
 from .routes import create_saved_route, list_saved_routes, get_saved_route, rename_saved_route, delete_saved_route
 from .calendar import (
     create_planned_run, list_planned_runs, get_planned_run,
     update_planned_run, cancel_planned_run,
+)
+from .profiles import get_profile, get_public_profile, upsert_profile
+from .follows import (
+    follow_user, unfollow_user, is_following, get_followers, get_following, get_follow_counts,
+    mute_author, unmute_author, is_muted, get_muted_authors,
 )
 import uvicorn
 
@@ -536,6 +542,199 @@ async def send_feedback(request: FeedbackRequest):
         raise
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to send feedback")
+
+
+# --- Public profiles and follows ---
+
+
+@app.get("/api/users/{user_id}/profile")
+async def get_user_profile(
+    user_id: str,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        target_id = UUID(user_id)
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        profile = await get_public_profile(target_id)
+        if profile is None:
+            raise HTTPException(status_code=404, detail="Profile not found or not public")
+        following = await is_following(me["id"], target_id)
+        muted = await is_muted(me["id"], target_id)
+        counts = await get_follow_counts(target_id)
+        return {
+            "profile": profile,
+            "is_following": following,
+            "is_muted": muted,
+            "followers_count": counts["followers_count"],
+            "following_count": counts["following_count"],
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to fetch user profile")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/api/users/{user_id}/follow")
+async def follow_user_endpoint(
+    user_id: str,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        target_id = UUID(user_id)
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        if str(me["id"]) == str(target_id):
+            raise HTTPException(status_code=400, detail="Cannot follow yourself")
+        await follow_user(me["id"], target_id)
+        return {"success": True, "is_following": True}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to follow user")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.delete("/api/users/{user_id}/follow")
+async def unfollow_user_endpoint(
+    user_id: str,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        target_id = UUID(user_id)
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        await unfollow_user(me["id"], target_id)
+        return {"success": True, "is_following": False}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to unfollow user")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/users/{user_id}/followers")
+async def get_followers_endpoint(
+    user_id: str,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        target_id = UUID(user_id)
+        await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        followers = await get_followers(target_id)
+        return {"followers": followers}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to fetch followers")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/users/{user_id}/following")
+async def get_following_endpoint(
+    user_id: str,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        target_id = UUID(user_id)
+        await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        following = await get_following(target_id)
+        return {"following": following}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to fetch following")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/api/users/{user_id}/mute")
+async def mute_user_endpoint(
+    user_id: str,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        target_id = UUID(user_id)
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        if str(me["id"]) == str(target_id):
+            raise HTTPException(status_code=400, detail="Cannot mute yourself")
+        await mute_author(me["id"], target_id)
+        return {"success": True, "is_muted": True}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to mute user")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.delete("/api/users/{user_id}/mute")
+async def unmute_user_endpoint(
+    user_id: str,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from uuid import UUID
+        target_id = UUID(user_id)
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        await unmute_author(me["id"], target_id)
+        return {"success": True, "is_muted": False}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to unmute user")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.exception_handler(Exception)

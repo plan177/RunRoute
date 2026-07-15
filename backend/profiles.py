@@ -37,6 +37,33 @@ async def get_profile(user_id: UUID) -> dict:
     return d
 
 
+async def get_public_profile(user_id: UUID) -> Optional[dict]:
+    """Get a user's public profile for viewing by others.
+
+    Returns None if profile doesn't exist or is not public.
+    """
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT p.display_name, p.bio, p.city, p.club_name, p.avatar_url,
+                   p.social_links, p.is_public,
+                   u.id, u.telegram_username, u.first_name, u.last_name,
+                   u.telegram_photo_url
+            FROM public.profiles p
+            JOIN public.users u ON u.id = p.user_id
+            WHERE p.user_id = $1 AND p.is_public = true
+            """,
+            user_id,
+        )
+    if row is None:
+        return None
+    d = dict(row)
+    if d["social_links"] is None:
+        d["social_links"] = {}
+    return d
+
+
 async def upsert_profile(
     user_id: UUID,
     display_name: Optional[str],

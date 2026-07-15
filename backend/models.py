@@ -325,3 +325,16 @@ class PlannedRunUpdate(BaseModel):
         return v
 
     model_config = {"extra": "forbid"}
+
+
+# --- Public profiles and follows ---
+
+
+class FollowResponse(BaseModel):
+    success: bool
+    is_following: bool
+
+
+class MuteResponse(BaseModel):
+    success: bool
+    is_muted: bool
