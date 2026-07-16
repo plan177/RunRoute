@@ -347,7 +347,7 @@ async def test_api_me_valid_calls_upsert():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=mock_user)) as mock_upsert, \
-         patch("backend.main.get_profile", new_callable=lambda: AsyncMock(return_value=None)):
+         patch("backend.main.get_profile_with_counts", new_callable=lambda: AsyncMock(return_value=None)):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/api/me", headers={"X-Telegram-Init-Data": init_data})
@@ -366,7 +366,7 @@ async def test_api_me_sql_uses_parameters():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user") as mock_upsert, \
-         patch("backend.main.get_profile", return_value=None):
+         patch("backend.main.get_profile_with_counts", return_value=None):
         mock_upsert.return_value = {
             "id": "00000000-0000-0000-0000-000000000002",
             "telegram_user_id": 42,
@@ -406,7 +406,7 @@ async def test_api_me_duplicate_updates_no_new_row():
 
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", side_effect=mock_upsert), \
-         patch("backend.main.get_profile", return_value=None):
+         patch("backend.main.get_profile_with_counts", return_value=None):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp1 = await client.get("/api/me", headers={"X-Telegram-Init-Data": init_data})

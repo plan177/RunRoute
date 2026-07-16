@@ -395,6 +395,21 @@
                     <label for="profile-social-website">Website</label>
                     <input type="url" id="profile-social-website" placeholder="https://..." />
                 </div>
+                <div class="profile-field">
+                    <label class="switch-label">
+                        <input type="checkbox" id="profile-is-public" />
+                        Публичный профиль
+                    </label>
+                    <small class="field-hint">Публичный профиль смогут видеть другие пользователи RunRoute</small>
+                </div>
+                <div id="profile-counts" class="profile-counts">
+                    <button id="profile-followers-btn" class="profile-count-btn">
+                        <span id="profile-followers-count">0</span> подписчиков
+                    </button>
+                    <button id="profile-following-btn" class="profile-count-btn">
+                        <span id="profile-following-count">0</span> подписок
+                    </button>
+                </div>
                 <div id="profile-status" class="profile-status hidden"></div>
                 <div class="modal-actions">
                     <button id="profile-save" class="modal-btn primary">Сохранить</button>
@@ -522,11 +537,71 @@
         </div>
     </div>
 
+    <div id="public-profile-modal" class="modal-overlay hidden">
+        <div class="modal-card modal-profile">
+            <div id="public-profile-loading" class="profile-loading">
+                <div class="skeleton skeleton-line"></div>
+                <div class="skeleton skeleton-line short"></div>
+                <div class="skeleton skeleton-line"></div>
+            </div>
+            <div id="public-profile-content" class="hidden">
+                <div id="public-profile-avatar-wrap" class="profile-avatar-wrap"></div>
+                <div id="public-profile-display-name" class="profile-display-name"></div>
+                <div id="public-profile-bio" class="profile-bio"></div>
+                <div id="public-profile-meta" class="profile-meta"></div>
+                <div id="public-profile-social" class="profile-social"></div>
+                <div id="public-profile-counts" class="profile-counts">
+                    <div class="profile-count-text">
+                        <span id="public-followers-count">0</span> подписчиков
+                    </div>
+                    <div class="profile-count-text">
+                        <span id="public-following-count">0</span> подписок
+                    </div>
+                </div>
+                <div id="public-profile-follow-area" class="profile-follow-area">
+                    <button id="public-follow-btn" class="modal-btn primary"></button>
+                </div>
+                <div id="public-notifications-area" class="profile-notifications-area hidden">
+                    <label class="switch-label">
+                        <input type="checkbox" id="public-notifications-toggle" />
+                        Уведомлять о новых пробежках
+                    </label>
+                </div>
+            </div>
+            <div id="public-profile-status" class="profile-status hidden"></div>
+            <div class="modal-actions">
+                <button id="public-profile-close" class="modal-btn secondary">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="follow-list-modal" class="modal-overlay hidden">
+        <div class="modal-card modal-profile">
+            <p id="follow-list-title" class="modal-text"></p>
+            <div id="follow-list-loading" class="profile-loading">
+                <div class="skeleton skeleton-line"></div>
+                <div class="skeleton skeleton-line short"></div>
+            </div>
+            <div id="follow-list-content" class="hidden">
+                <div id="follow-list-items" class="follow-list-items"></div>
+                <div id="follow-list-empty" class="follow-list-empty hidden">Список пуст</div>
+                <div id="follow-list-load-more" class="hidden">
+                    <button id="follow-list-load-more-btn" class="modal-btn secondary">Показать ещё</button>
+                </div>
+            </div>
+            <div id="follow-list-status" class="profile-status hidden"></div>
+            <div class="modal-actions">
+                <button id="follow-list-close" class="modal-btn secondary">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
     <script src="config.js"></script>
     <script src="route-utils.js"></script>
     <script src="pace-utils.js"></script>
     <script src="mode-utils.js"></script>
     <script src="calendar-utils.js"></script>
+    <script src="public-profile-utils.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

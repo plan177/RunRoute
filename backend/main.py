@@ -1,7 +1,8 @@
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Request, Query, Depends
+from uuid import UUID
+from fastapi import FastAPI, HTTPException, Request, Query, Depends, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import httpx
@@ -11,12 +12,18 @@ from .config import get_settings
 from .database import init_db_pool, close_db_pool, check_database_connection
 from .auth import get_current_telegram_user
 from .users import upsert_user
-from .profiles import get_profile, upsert_profile
+from .profiles import get_profile, get_profile_with_counts, get_public_profile, update_profile_fields, user_exists
 from .models import ProfileUpdateRequest, SavedRouteCreate, SavedRouteRename, PlannedRunCreate, PlannedRunUpdate
+from .models import FollowNotificationsUpdate
 from .routes import create_saved_route, list_saved_routes, get_saved_route, rename_saved_route, delete_saved_route
 from .calendar import (
     create_planned_run, list_planned_runs, get_planned_run,
     update_planned_run, cancel_planned_run,
+)
+from .follows import (
+    follow_user, unfollow_user, is_following,
+    get_followers, get_following, get_follow_counts,
+    set_run_notifications, get_run_notifications_enabled, decode_cursor,
 )
 import uvicorn
 
@@ -121,7 +128,7 @@ async def get_me(telegram_user: dict = Depends(get_current_telegram_user)):
             language_code=telegram_user.get("language_code"),
             photo_url=telegram_user.get("photo_url"),
         )
-        profile = await get_profile(user["id"])
+        profile = await get_profile_with_counts(user["id"])
         return {"user": user, "profile": profile}
     except Exception:
         logger.error("Failed to synchronize current user")
@@ -139,7 +146,7 @@ async def get_profile_endpoint(telegram_user: dict = Depends(get_current_telegra
             language_code=telegram_user.get("language_code"),
             photo_url=telegram_user.get("photo_url"),
         )
-        profile = await get_profile(user["id"])
+        profile = await get_profile_with_counts(user["id"])
         return {"user": user, "profile": profile}
     except Exception:
         logger.error("Failed to fetch profile")
@@ -160,16 +167,11 @@ async def update_profile_endpoint(
             language_code=telegram_user.get("language_code"),
             photo_url=telegram_user.get("photo_url"),
         )
-        social = request.social_links.model_dump() if request.social_links else {}
-        profile = await upsert_profile(
-            user_id=user["id"],
-            display_name=request.display_name,
-            bio=request.bio,
-            city=request.city,
-            club_name=request.club_name,
-            avatar_url=request.avatar_url,
-            social_links=social,
-        )
+        fields = request.model_dump(exclude_unset=True)
+        # Convert social_links to dict if present
+        if "social_links" in fields and fields["social_links"] is not None:
+            fields["social_links"] = fields["social_links"].model_dump()
+        profile = await update_profile_fields(user_id=user["id"], fields=fields)
         return {"user": user, "profile": profile}
     except Exception:
         logger.error("Failed to update profile")
@@ -536,6 +538,205 @@ async def send_feedback(request: FeedbackRequest):
         raise
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to send feedback")
+
+
+# --- Public profiles and follows ---
+
+
+@app.get("/api/users/{user_id}/profile")
+async def get_user_profile(
+    user_id: UUID,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        profile = await get_public_profile(user_id, viewer_id=me["id"])
+        if profile is None:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        following = await is_following(me["id"], user_id)
+        run_notifs = await get_run_notifications_enabled(me["id"], user_id) if following else None
+        counts = await get_follow_counts(user_id)
+        return {
+            "profile": profile,
+            "is_following": following,
+            "run_notifications_enabled": run_notifs,
+            "followers_count": counts["followers_count"],
+            "following_count": counts["following_count"],
+        }
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+    except Exception:
+        logger.error("Failed to fetch user profile")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/api/users/{user_id}/follow")
+async def follow_user_endpoint(
+    user_id: UUID,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        if str(me["id"]) == str(user_id):
+            raise HTTPException(status_code=400, detail="Cannot follow yourself")
+        exists = await user_exists(user_id)
+        if not exists:
+            raise HTTPException(status_code=404, detail="User not found")
+        profile = await get_profile(user_id)
+        if not profile.get("is_public"):
+            raise HTTPException(status_code=404, detail="Profile not found or not public")
+        await follow_user(me["id"], user_id)
+        run_notifications_enabled = await get_run_notifications_enabled(me["id"], user_id)
+        if run_notifications_enabled is None:
+            raise HTTPException(status_code=500, detail="Follow operation failed")
+        counts = await get_follow_counts(user_id)
+        return {
+            "is_following": True,
+            "followers_count": counts["followers_count"],
+            "run_notifications_enabled": run_notifications_enabled,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to follow user")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.delete("/api/users/{user_id}/follow")
+async def unfollow_user_endpoint(
+    user_id: UUID,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        await unfollow_user(me["id"], user_id)
+        counts = await get_follow_counts(user_id)
+        return {
+            "is_following": False,
+            "followers_count": counts["followers_count"],
+            "run_notifications_enabled": None,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to unfollow user")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.put("/api/users/{user_id}/follow/notifications")
+async def set_follow_notifications_endpoint(
+    user_id: UUID,
+    request: FollowNotificationsUpdate,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        updated = await set_run_notifications(me["id"], user_id, request.enabled)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Follow relationship not found")
+        return {"run_notifications_enabled": request.enabled}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to set notifications")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/me/followers")
+async def get_my_followers(
+    telegram_user: dict = Depends(get_current_telegram_user),
+    cursor: str = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+):
+    try:
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        if cursor:
+            try:
+                decode_cursor(cursor)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid cursor")
+        result = await get_followers(me["id"], limit=limit, cursor=cursor)
+        users = [
+            {k: v for k, v in u.items() if k in {"user_id", "display_name", "avatar_url", "city", "club_name"}}
+            for u in result["users"]
+        ]
+        return {"users": users, "next_cursor": result["next_cursor"]}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to fetch followers")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/me/following")
+async def get_my_following(
+    telegram_user: dict = Depends(get_current_telegram_user),
+    cursor: str = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+):
+    try:
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        if cursor:
+            try:
+                decode_cursor(cursor)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid cursor")
+        result = await get_following(me["id"], limit=limit, cursor=cursor)
+        allowed_keys = {"user_id", "display_name", "avatar_url", "city", "club_name", "run_notifications_enabled"}
+        users = [
+            {k: v for k, v in u.items() if k in allowed_keys}
+            for u in result["users"]
+        ]
+        return {"users": users, "next_cursor": result["next_cursor"]}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Failed to fetch following")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.exception_handler(Exception)
