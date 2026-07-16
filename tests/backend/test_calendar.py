@@ -1376,7 +1376,8 @@ async def test_follow_user_success():
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
          patch("backend.main.user_exists", new_callable=lambda: AsyncMock(return_value=True)), \
          patch("backend.main.get_profile", new_callable=lambda: AsyncMock(return_value={"is_public": True})), \
-         patch("backend.main.follow_user", new_callable=lambda: AsyncMock(return_value=True)), \
+         patch("backend.main.follow_user", new_callable=lambda: AsyncMock()), \
+         patch("backend.main.get_run_notifications_enabled", new_callable=lambda: AsyncMock(return_value=True)), \
          patch("backend.main.get_follow_counts", new_callable=lambda: AsyncMock(return_value={
              "followers_count": 10, "following_count": 0,
          })):
@@ -1391,6 +1392,35 @@ async def test_follow_user_success():
         assert data["is_following"] is True
         assert data["followers_count"] == 10
         assert data["run_notifications_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_follow_user_repeated_preserves_notification_state():
+    """Repeated follow preserves existing run_notifications_enabled=false."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.user_exists", new_callable=lambda: AsyncMock(return_value=True)), \
+         patch("backend.main.get_profile", new_callable=lambda: AsyncMock(return_value={"is_public": True})), \
+         patch("backend.main.follow_user", new_callable=lambda: AsyncMock()) as mock_follow, \
+         patch("backend.main.get_run_notifications_enabled", new_callable=lambda: AsyncMock(return_value=False)), \
+         patch("backend.main.get_follow_counts", new_callable=lambda: AsyncMock(return_value={
+             "followers_count": 5, "following_count": 1,
+         })):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/users/00000000-0000-0000-0000-000000000099/follow",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["is_following"] is True
+        assert data["run_notifications_enabled"] is False
+        assert data["followers_count"] == 5
 
 
 @pytest.mark.asyncio

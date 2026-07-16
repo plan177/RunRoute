@@ -1648,6 +1648,17 @@ body {
     background: var(--glass-border);
 }
 
+.profile-count-text {
+    font-size: 14px;
+    color: var(--text-secondary);
+    padding: 8px 0;
+}
+
+.profile-count-text span {
+    font-weight: 700;
+    color: var(--primary);
+}
+
 /* Public profile modal */
 .profile-avatar-wrap {
     text-align: center;

@@ -2593,9 +2593,6 @@ async function openPublicProfile(userId) {
         safeSetText(document.getElementById('public-followers-count'), data.followers_count != null ? data.followers_count : 0);
         safeSetText(document.getElementById('public-following-count'), data.following_count != null ? data.following_count : 0);
 
-        document.getElementById('public-followers-btn').onclick = () => openFollowList('followers');
-        document.getElementById('public-following-btn').onclick = () => openFollowList('following');
-
         updatePublicFollowUI(data.is_following, data.run_notifications_enabled, userId);
 
         loading.classList.add('hidden');
@@ -2612,6 +2609,7 @@ function updatePublicFollowUI(isFollowing, runNotifs, userId) {
     const followBtn = document.getElementById('public-follow-btn');
     const notifArea = document.getElementById('public-notifications-area');
     const notifToggle = document.getElementById('public-notifications-toggle');
+    const status = document.getElementById('public-profile-status');
 
     safeSetText(followBtn, isFollowing ? 'Отписаться' : 'Подписаться');
     followBtn.className = isFollowing ? 'modal-btn secondary' : 'modal-btn primary';
@@ -2619,6 +2617,9 @@ function updatePublicFollowUI(isFollowing, runNotifs, userId) {
     followBtn.onclick = async () => {
         if (!isTelegramApp()) return;
         followBtn.disabled = true;
+        status.classList.add('hidden');
+        const prevFollowing = isFollowing;
+        const prevNotifs = runNotifs;
         try {
             const method = isFollowing ? 'DELETE' : 'POST';
             const resp = await fetch(apiUrl('/api/users/' + userId + '/follow'), {
@@ -2627,13 +2628,28 @@ function updatePublicFollowUI(isFollowing, runNotifs, userId) {
             });
             if (resp.ok) {
                 const result = await resp.json();
-                const newFollowing = !isFollowing;
-                updatePublicFollowUI(newFollowing, result.run_notifications_enabled, userId);
+                isFollowing = result.is_following != null ? result.is_following : !prevFollowing;
+                runNotifs = result.run_notifications_enabled;
+                updatePublicFollowUI(isFollowing, runNotifs, userId);
                 safeSetText(document.getElementById('public-followers-count'),
                     result.followers_count != null ? result.followers_count : 0);
+                status.classList.add('hidden');
+            } else {
+                let msg = 'Не удалось изменить подписку';
+                try {
+                    const data = await resp.json();
+                    if (resp.status === 404) msg = 'Профиль больше недоступен';
+                    else if (resp.status >= 500) msg = 'Сервис временно недоступен';
+                    else if (data.detail) msg = data.detail;
+                } catch {}
+                safeSetText(status, msg);
+                status.className = 'profile-status error';
+                status.classList.remove('hidden');
             }
         } catch (e) {
-            console.error('Follow error:', e);
+            safeSetText(status, 'Не удалось подключиться к серверу');
+            status.className = 'profile-status error';
+            status.classList.remove('hidden');
         } finally {
             followBtn.disabled = false;
         }
@@ -2643,15 +2659,40 @@ function updatePublicFollowUI(isFollowing, runNotifs, userId) {
         notifArea.classList.remove('hidden');
         notifToggle.checked = !!runNotifs;
         notifToggle.onchange = async () => {
+            const prevChecked = notifToggle.checked;
+            notifToggle.disabled = true;
+            status.classList.add('hidden');
             try {
-                await fetch(apiUrl('/api/users/' + userId + '/follow/notifications'), {
+                const resp = await fetch(apiUrl('/api/users/' + userId + '/follow/notifications'), {
                     method: 'PUT',
                     headers: getApiHeaders(),
                     body: JSON.stringify({ enabled: notifToggle.checked }),
                 });
+                if (resp.ok) {
+                    const result = await resp.json();
+                    notifToggle.checked = result.run_notifications_enabled != null
+                        ? result.run_notifications_enabled
+                        : prevChecked;
+                    runNotifs = notifToggle.checked;
+                    status.classList.add('hidden');
+                } else {
+                    notifToggle.checked = !prevChecked;
+                    let msg = 'Не удалось изменить настройку';
+                    try {
+                        const data = await resp.json();
+                        if (data.detail) msg = data.detail;
+                    } catch {}
+                    safeSetText(status, msg);
+                    status.className = 'profile-status error';
+                    status.classList.remove('hidden');
+                }
             } catch (e) {
-                console.error('Notification toggle error:', e);
-                notifToggle.checked = !notifToggle.checked;
+                notifToggle.checked = !prevChecked;
+                safeSetText(status, 'Не удалось подключиться к серверу');
+                status.className = 'profile-status error';
+                status.classList.remove('hidden');
+            } finally {
+                notifToggle.disabled = false;
             }
         };
     } else {

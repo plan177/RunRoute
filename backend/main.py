@@ -602,11 +602,14 @@ async def follow_user_endpoint(
         if not profile.get("is_public"):
             raise HTTPException(status_code=404, detail="Profile not found or not public")
         await follow_user(me["id"], user_id)
+        run_notifications_enabled = await get_run_notifications_enabled(me["id"], user_id)
+        if run_notifications_enabled is None:
+            raise HTTPException(status_code=500, detail="Follow operation failed")
         counts = await get_follow_counts(user_id)
         return {
             "is_following": True,
             "followers_count": counts["followers_count"],
-            "run_notifications_enabled": True,
+            "run_notifications_enabled": run_notifications_enabled,
         }
     except HTTPException:
         raise

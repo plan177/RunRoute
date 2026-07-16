@@ -26,11 +26,11 @@ def decode_cursor(cursor: str) -> dict:
         raise ValueError("Invalid cursor")
 
 
-async def follow_user(follower_id: UUID, following_id: UUID) -> bool:
-    """Follow a user. Returns True if a new follow was created, False if already following."""
+async def follow_user(follower_id: UUID, following_id: UUID) -> None:
+    """Follow a user. Idempotent — does nothing if already following."""
     pool = get_db_pool()
     async with pool.acquire() as conn:
-        result = await conn.execute(
+        await conn.execute(
             """
             INSERT INTO public.follows (follower_id, following_id)
             VALUES ($1, $2)
@@ -39,7 +39,6 @@ async def follow_user(follower_id: UUID, following_id: UUID) -> bool:
             follower_id,
             following_id,
         )
-        return result == "INSERT 0 1"
 
 
 async def unfollow_user(follower_id: UUID, following_id: UUID) -> None:
