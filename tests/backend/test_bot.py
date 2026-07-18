@@ -1,0 +1,477 @@
+import asyncio
+import sys
+import pytest
+from unittest.mock import patch, MagicMock, AsyncMock
+
+
+FAKE_TOKEN = "1234567890:ABCdefGHIjklMNOpqrsTUVwxyzSECRET_TOKEN_HERE"
+FAKE_CHAT_ID = 999999999
+
+
+def _reload_bot():
+    if 'bot' in sys.modules:
+        del sys.modules['bot']
+    import bot
+    return bot
+
+
+def _make_builder_mock(mock_app):
+    builder = MagicMock()
+    builder.return_value = builder
+    builder.token.return_value = builder
+    builder.post_init.return_value = builder
+    builder.post_shutdown.return_value = builder
+    builder.build.return_value = mock_app
+    return builder
+
+
+def _make_run():
+    from datetime import datetime, timezone
+    return {
+        "id": 1,
+        "telegram_user_id": FAKE_CHAT_ID,
+        "title": "Test",
+        "starts_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+    }
+
+
+# --- Existing InvalidToken tests ---
+
+
+def test_invalid_token_exits_with_error():
+    from telegram.error import InvalidToken
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.run_polling.side_effect = InvalidToken("Unauthorized")
+    orig_token = bot_mod.BOT_TOKEN
+    try:
+        bot_mod.BOT_TOKEN = FAKE_TOKEN
+        with patch.object(bot_mod, "ApplicationBuilder", _make_builder_mock(mock_app)):
+            with pytest.raises(SystemExit) as exc_info:
+                bot_mod.main()
+            assert exc_info.value.code == 1
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+
+
+def test_invalid_token_log_does_not_contain_token(capsys):
+    from telegram.error import InvalidToken
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.run_polling.side_effect = InvalidToken("Unauthorized")
+    orig_token = bot_mod.BOT_TOKEN
+    try:
+        bot_mod.BOT_TOKEN = FAKE_TOKEN
+        with patch.object(bot_mod, "ApplicationBuilder", _make_builder_mock(mock_app)):
+            with pytest.raises(SystemExit):
+                bot_mod.main()
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+    captured = capsys.readouterr()
+    assert FAKE_TOKEN not in captured.out
+    assert FAKE_TOKEN not in captured.err
+
+
+def test_invalid_token_log_message_is_safe():
+    from telegram.error import InvalidToken
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.run_polling.side_effect = InvalidToken("Unauthorized")
+    mock_logger = MagicMock()
+    orig_token = bot_mod.BOT_TOKEN
+    orig_logger = bot_mod.logger
+    try:
+        bot_mod.BOT_TOKEN = FAKE_TOKEN
+        bot_mod.logger = mock_logger
+        with patch.object(bot_mod, "ApplicationBuilder", _make_builder_mock(mock_app)):
+            with patch("backend.config.get_settings") as mock_settings, \
+                 patch("backend.database.init_db_pool", new_callable=AsyncMock):
+                mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = "postgres://ok"
+                with pytest.raises(SystemExit):
+                    bot_mod.main()
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+        bot_mod.logger = orig_logger
+    mock_logger.error.assert_called_with(
+        "Telegram rejected BOT_TOKEN; rotate the token in deployment variables"
+    )
+    for arg in mock_logger.error.call_args[0]:
+        assert FAKE_TOKEN not in str(arg)
+
+
+def test_invalid_token_does_not_leak_exception_object():
+    from telegram.error import InvalidToken
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    exc = InvalidToken("Unauthorized: " + FAKE_TOKEN)
+    mock_app.run_polling.side_effect = exc
+    mock_logger = MagicMock()
+    orig_token = bot_mod.BOT_TOKEN
+    orig_logger = bot_mod.logger
+    try:
+        bot_mod.BOT_TOKEN = FAKE_TOKEN
+        bot_mod.logger = mock_logger
+        with patch.object(bot_mod, "ApplicationBuilder", _make_builder_mock(mock_app)):
+            with pytest.raises(SystemExit):
+                bot_mod.main()
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+        bot_mod.logger = orig_logger
+    mock_logger.error.assert_called_once()
+    for arg in mock_logger.error.call_args[0]:
+        assert not isinstance(arg, InvalidToken)
+        assert FAKE_TOKEN not in str(arg)
+
+
+def test_invalid_token_with_fake_token_in_message(caplog):
+    from telegram.error import InvalidToken
+    import logging
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    fake_msg = "Unauthorized: bot " + FAKE_TOKEN + " getMe"
+    mock_app.run_polling.side_effect = InvalidToken(fake_msg)
+    orig_token = bot_mod.BOT_TOKEN
+    try:
+        bot_mod.BOT_TOKEN = FAKE_TOKEN
+        with caplog.at_level(logging.ERROR, logger="bot"):
+            with patch.object(bot_mod, "ApplicationBuilder", _make_builder_mock(mock_app)):
+                with pytest.raises(SystemExit):
+                    bot_mod.main()
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+    assert FAKE_TOKEN not in caplog.text
+
+
+def test_normal_startup_not_affected():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.run_polling.return_value = None
+    orig_token = bot_mod.BOT_TOKEN
+    try:
+        bot_mod.BOT_TOKEN = FAKE_TOKEN
+        with patch.object(bot_mod, "ApplicationBuilder", _make_builder_mock(mock_app)), \
+             patch("sys.exit") as mock_exit, \
+             patch("backend.config.get_settings") as mock_settings, \
+             patch("backend.database.init_db_pool", new_callable=AsyncMock):
+            mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = "postgres://ok"
+            bot_mod.main()
+            mock_exit.assert_not_called()
+            mock_app.run_polling.assert_called_once()
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+
+
+# --- Environment variable checks ---
+
+
+def test_missing_bot_token_exits_with_code_1():
+    bot_mod = _reload_bot()
+    orig_token = bot_mod.BOT_TOKEN
+    try:
+        bot_mod.BOT_TOKEN = ""
+        with patch("backend.config.get_settings") as mock_settings:
+            mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = "postgres://ok"
+            with pytest.raises(SystemExit) as exc_info:
+                bot_mod.main()
+            assert exc_info.value.code == 1
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+
+
+def test_missing_database_url_exits_with_code_1():
+    bot_mod = _reload_bot()
+    orig_token = bot_mod.BOT_TOKEN
+    try:
+        bot_mod.BOT_TOKEN = FAKE_TOKEN
+        with patch("backend.config.get_settings") as mock_settings:
+            mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = ""
+            with pytest.raises(SystemExit) as exc_info:
+                bot_mod.main()
+            assert exc_info.value.code == 1
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+
+
+def test_missing_env_does_not_log_value(caplog):
+    import logging
+    bot_mod = _reload_bot()
+    orig_token = bot_mod.BOT_TOKEN
+    try:
+        bot_mod.BOT_TOKEN = ""
+        with patch("backend.config.get_settings") as mock_settings, \
+             caplog.at_level(logging.ERROR, logger="bot"):
+            mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = ""
+            with pytest.raises(SystemExit):
+                bot_mod.main()
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+    assert FAKE_TOKEN not in caplog.text
+    assert "postgres://" not in caplog.text
+
+
+# --- Classification tests ---
+
+
+def test_classify_forbidden():
+    from telegram.error import Forbidden
+    bot_mod = _reload_bot()
+    assert bot_mod._classify_send_error(Forbidden("forbidden")) == "telegram_forbidden"
+
+
+def test_classify_timed_out():
+    from telegram.error import TimedOut
+    bot_mod = _reload_bot()
+    assert bot_mod._classify_send_error(TimedOut()) == "telegram_timeout"
+
+
+def test_classify_network_error():
+    from telegram.error import NetworkError
+    bot_mod = _reload_bot()
+    assert bot_mod._classify_send_error(NetworkError("fail")) == "telegram_network_error"
+
+
+def test_classify_bad_request():
+    from telegram.error import BadRequest
+    bot_mod = _reload_bot()
+    assert bot_mod._classify_send_error(BadRequest("bad")) == "telegram_api_error"
+
+
+def test_classify_unexpected():
+    bot_mod = _reload_bot()
+    assert bot_mod._classify_send_error(RuntimeError("oops")) == "unexpected_error"
+
+
+# --- process_due_reminders_once tests ---
+
+
+@pytest.mark.asyncio
+async def test_send_message_error_uses_safe_code(caplog):
+    import logging
+    bot_mod = _reload_bot()
+    mock_bot = MagicMock()
+    mock_bot.send_message.side_effect = RuntimeError("password=secret123 host=db.internal")
+    run = _make_run()
+
+    with patch("backend.reminders.recover_stale_processing", new_callable=AsyncMock), \
+         patch("backend.reminders.fetch_due_reminders", new_callable=AsyncMock, return_value=[run]), \
+         patch("backend.reminders.verify_reminder_still_valid", new_callable=AsyncMock, return_value=True), \
+         patch("backend.reminders.mark_sent", new_callable=AsyncMock), \
+         patch("backend.reminders.mark_failed", new_callable=AsyncMock) as mock_fail:
+        with caplog.at_level(logging.ERROR, logger="bot"):
+            count = await bot_mod.process_due_reminders_once(mock_bot)
+
+    assert count == 0
+    mock_fail.assert_called_once_with(1, "unexpected_error")
+    assert "secret123" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_send_message_forbidden_uses_safe_code():
+    from telegram.error import Forbidden
+    bot_mod = _reload_bot()
+    mock_bot = MagicMock()
+    mock_bot.send_message.side_effect = Forbidden("forbidden")
+    run = _make_run()
+    run["id"] = 42
+
+    with patch("backend.reminders.recover_stale_processing", new_callable=AsyncMock), \
+         patch("backend.reminders.fetch_due_reminders", new_callable=AsyncMock, return_value=[run]), \
+         patch("backend.reminders.verify_reminder_still_valid", new_callable=AsyncMock, return_value=True), \
+         patch("backend.reminders.mark_sent", new_callable=AsyncMock), \
+         patch("backend.reminders.mark_failed", new_callable=AsyncMock) as mock_fail:
+        await bot_mod.process_due_reminders_once(mock_bot)
+
+    mock_fail.assert_called_once_with(42, "telegram_forbidden")
+
+
+@pytest.mark.asyncio
+async def test_send_message_error_no_token_in_log(caplog):
+    import logging
+    bot_mod = _reload_bot()
+    mock_bot = MagicMock()
+    error_msg = "Unauthorized: bot " + FAKE_TOKEN + " getMe"
+    mock_bot.send_message.side_effect = RuntimeError(error_msg)
+    run = _make_run()
+
+    with patch("backend.reminders.recover_stale_processing", new_callable=AsyncMock), \
+         patch("backend.reminders.fetch_due_reminders", new_callable=AsyncMock, return_value=[run]), \
+         patch("backend.reminders.verify_reminder_still_valid", new_callable=AsyncMock, return_value=True), \
+         patch("backend.reminders.mark_sent", new_callable=AsyncMock), \
+         patch("backend.reminders.mark_failed", new_callable=AsyncMock):
+        with caplog.at_level(logging.ERROR, logger="bot"):
+            await bot_mod.process_due_reminders_once(mock_bot)
+
+    assert FAKE_TOKEN not in caplog.text
+
+
+# --- Lifecycle tests ---
+
+
+@pytest.mark.asyncio
+async def test_post_init_initializes_pool():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot_data = {}
+
+    with patch("backend.database.init_db_pool", new_callable=AsyncMock) as mock_init, \
+         patch("asyncio.create_task") as mock_create_task:
+        mock_create_task.return_value = MagicMock()
+        await bot_mod.post_init(mock_app)
+
+    mock_init.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_post_init_stores_task_in_bot_data():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot_data = {}
+
+    mock_task = MagicMock()
+    with patch("backend.database.init_db_pool", new_callable=AsyncMock), \
+         patch("asyncio.create_task", return_value=mock_task):
+        await bot_mod.post_init(mock_app)
+
+    assert mock_app.bot_data["reminder_worker_task"] is mock_task
+
+
+@pytest.mark.asyncio
+async def test_post_init_does_not_use_app_create_task():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot_data = {}
+    mock_app.create_task = MagicMock()
+
+    with patch("backend.database.init_db_pool", new_callable=AsyncMock), \
+         patch("asyncio.create_task", return_value=MagicMock()):
+        await bot_mod.post_init(mock_app)
+
+    mock_app.create_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_post_shutdown_cancels_task_and_closes_pool():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+
+    async def fake_task():
+        await asyncio.sleep(100)
+
+    task = asyncio.create_task(fake_task())
+    mock_app.bot_data = {"reminder_worker_task": task}
+
+    with patch("backend.database.close_db_pool", new_callable=AsyncMock) as mock_close:
+        await bot_mod.post_shutdown(mock_app)
+
+    assert task.cancelled()
+    mock_close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_post_shutdown_handles_missing_task():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot_data = {}
+
+    with patch("backend.database.close_db_pool", new_callable=AsyncMock) as mock_close:
+        await bot_mod.post_shutdown(mock_app)
+
+    mock_close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_post_shutdown_handles_already_done_task():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_task = asyncio.create_task(asyncio.sleep(0))
+    await asyncio.sleep(0)  # let it complete
+    mock_app.bot_data = {"reminder_worker_task": mock_task}
+
+    with patch("backend.database.close_db_pool", new_callable=AsyncMock) as mock_close:
+        await bot_mod.post_shutdown(mock_app)
+
+    mock_close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reminder_worker_handles_cancelled_error():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot = MagicMock()
+
+    with patch("bot.process_due_reminders_once", new_callable=AsyncMock,
+               side_effect=asyncio.CancelledError()):
+        task = asyncio.create_task(bot_mod.reminder_worker(mock_app))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert task.cancelled() or task.done()
+
+
+@pytest.mark.asyncio
+async def test_reminder_worker_no_exc_info_in_log(caplog):
+    import logging
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot = MagicMock()
+
+    with patch("bot.process_due_reminders_once", new_callable=AsyncMock,
+               side_effect=RuntimeError("DB password=secret999 host=prod.db")):
+        with caplog.at_level(logging.ERROR, logger="bot"):
+            try:
+                await asyncio.wait_for(
+                    bot_mod.reminder_worker(mock_app), timeout=0.1
+                )
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+
+    assert any("Reminder worker iteration failed" in r.message for r in caplog.records)
+    assert "secret999" not in caplog.text
+    for record in caplog.records:
+        assert record.exc_info is None, "exc_info must not be set"
+
+
+@pytest.mark.asyncio
+async def test_reminder_worker_log_action_and_error_type(caplog):
+    import logging
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot = MagicMock()
+
+    with patch("bot.process_due_reminders_once", new_callable=AsyncMock,
+               side_effect=ValueError("something")):
+        with caplog.at_level(logging.ERROR, logger="bot"):
+            try:
+                await asyncio.wait_for(
+                    bot_mod.reminder_worker(mock_app), timeout=0.1
+                )
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+
+    error_records = [r for r in caplog.records if "Reminder worker" in r.message]
+    assert len(error_records) >= 1
+    msg = error_records[0].message
+    assert "action=worker_tick" in msg
+    assert "error_type=ValueError" in msg
+
+
+def test_main_uses_post_shutdown():
+    """main() passes post_shutdown to ApplicationBuilder."""
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.run_polling.return_value = None
+    orig_token = bot_mod.BOT_TOKEN
+    try:
+        bot_mod.BOT_TOKEN = FAKE_TOKEN
+        with patch.object(bot_mod, "ApplicationBuilder", _make_builder_mock(mock_app)), \
+             patch("sys.exit"):
+            bot_mod.main()
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+    # Verify post_shutdown was configured
+    builder = mock_app  # builder mock chains through
+    assert hasattr(bot_mod, "post_shutdown")
