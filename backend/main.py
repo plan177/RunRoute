@@ -22,7 +22,7 @@ from .calendar import (
     update_planned_run, cancel_planned_run,
 )
 from .lobbies import (
-    create_lobby, get_lobby, get_organizer_info, list_lobbies,
+    create_lobby, get_lobby_with_organizer, list_lobbies,
     update_lobby, cancel_lobby, _decode_cursor,
 )
 from .models import RunLobbyCreate, RunLobbyUpdate
@@ -558,7 +558,7 @@ async def get_lobby_endpoint(
     telegram_user: dict = Depends(get_current_telegram_user),
 ):
     try:
-        me = await upsert_user(
+        await upsert_user(
             telegram_user_id=telegram_user["id"],
             username=telegram_user.get("username"),
             first_name=telegram_user.get("first_name", ""),
@@ -566,36 +566,10 @@ async def get_lobby_endpoint(
             language_code=telegram_user.get("language_code"),
             photo_url=telegram_user.get("photo_url"),
         )
-        lobby = await get_lobby(lobby_id, viewer_id=me["id"])
+        lobby = await get_lobby_with_organizer(lobby_id)
         if lobby is None:
             raise HTTPException(status_code=404, detail="Lobby not found")
-
-        organizer = await get_organizer_info(lobby["organizer_id"])
-
-        # Build safe response — no Telegram/PII fields from users
-        return {
-            "id": lobby["id"],
-            "title": lobby["title"],
-            "run_type": lobby["run_type"],
-            "starts_at": lobby["starts_at"],
-            "city": lobby["city"],
-            "area_label": lobby["area_label"],
-            "meeting_lat": lobby["meeting_lat"],
-            "meeting_lng": lobby["meeting_lng"],
-            "distance_m": lobby["distance_m"],
-            "pace_min_sec_per_km": lobby["pace_min_sec_per_km"],
-            "pace_max_sec_per_km": lobby["pace_max_sec_per_km"],
-            "duration_minutes": lobby["duration_minutes"],
-            "capacity": lobby["capacity"],
-            "description": lobby["description"],
-            "status": lobby["status"],
-            "saved_route_id": lobby["saved_route_id"],
-            "route_name": lobby.get("route_name"),
-            "participant_count": lobby.get("participant_count"),
-            "organizer": organizer,
-            "created_at": lobby["created_at"],
-            "updated_at": lobby["updated_at"],
-        }
+        return lobby
     except HTTPException:
         raise
     except Exception as exc:
@@ -636,8 +610,6 @@ async def update_lobby_endpoint(
             raise HTTPException(status_code=409, detail="Cannot update a cancelled or completed lobby")
         if isinstance(result, dict) and result.get("error") == "route_not_found":
             raise HTTPException(status_code=404, detail="Saved route not found")
-        if isinstance(result, dict) and result.get("error") == "invalid_pace_pair":
-            raise HTTPException(status_code=422, detail="pace_min_sec_per_km must be <= pace_max_sec_per_km")
         if isinstance(result, dict) and result.get("error") == "invalid_pace_pair":
             raise HTTPException(status_code=422, detail="pace_min_sec_per_km must be <= pace_max_sec_per_km")
         return result

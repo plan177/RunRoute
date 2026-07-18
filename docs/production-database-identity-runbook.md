@@ -570,7 +570,7 @@ ORDER BY filename;
 ### Какие проверки безопасно выполнить сейчас
 
 - Анализ кода `config.py`, `migrate.py`, `database.py` — **выполнено**
-- Анализ миграций 001–005 — **выполнено**
+- Анализ миграций 001–006 — **выполнено**
 - Определение формата URL — **выполнено**
 - Read-only SQL запросы — **подготовлены**, ожидают выполнения пользователем
 
@@ -581,13 +581,3 @@ ORDER BY filename;
 - Миграции (001–006) — не добавлять, не удалять, не изменять
 - `.env` файлы — не коммитить
 - Production URL приложения
-
-### Base commit SHA
-
-```
-690b5703d4ff26cba33523a198352b035e6d3c0a
-```
-
-### Compare URL
-
-https://github.com/plan177/RunRoute/compare/docs/production-database-identity-runbook?expand=1

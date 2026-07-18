@@ -200,7 +200,7 @@ async def create_lobby(
             return lobby
 
 
-async def get_lobby(lobby_id: UUID, viewer_id: Optional[UUID] = None) -> Optional[dict]:
+async def get_lobby_with_organizer(lobby_id: UUID) -> Optional[dict]:
     pool = get_db_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -212,7 +212,11 @@ async def get_lobby(lobby_id: UUID, viewer_id: Optional[UUID] = None) -> Optiona
                    l.created_at, l.updated_at,
                    sr.name AS route_name,
                    (SELECT COUNT(*) FROM public.run_lobby_participants lp
-                    WHERE lp.lobby_id = l.id AND lp.status = 'joined') AS participant_count
+                    WHERE lp.lobby_id = l.id AND lp.status = 'joined') AS participant_count,
+                   COALESCE(p.display_name, '') AS org_display_name,
+                   p.avatar_url AS org_avatar_url,
+                   p.city AS org_city,
+                   p.club_name AS org_club_name
             FROM public.run_lobbies l
             LEFT JOIN public.saved_routes sr ON sr.id = l.saved_route_id
             JOIN public.users u ON u.id = l.organizer_id AND u.is_active = true
@@ -223,7 +227,15 @@ async def get_lobby(lobby_id: UUID, viewer_id: Optional[UUID] = None) -> Optiona
         )
     if row is None:
         return None
-    return dict(row)
+    d = dict(row)
+    d["organizer"] = {
+        "user_id": d["organizer_id"],
+        "display_name": d.pop("org_display_name") or None,
+        "avatar_url": d.pop("org_avatar_url"),
+        "city": d.pop("org_city"),
+        "club_name": d.pop("org_club_name"),
+    }
+    return d
 
 
 async def get_organizer_info(organizer_id: UUID) -> Optional[dict]:

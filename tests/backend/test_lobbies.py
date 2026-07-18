@@ -344,7 +344,7 @@ async def test_get_lobby_not_found():
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby", new_callable=lambda: AsyncMock(return_value=None)):
+         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=None)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             assert (await c.get("/api/lobbies/00000000-0000-0000-0000-000000000099",
                                 headers={"X-Telegram-Init-Data": init_data})).status_code == 404
@@ -354,10 +354,11 @@ async def test_get_lobby_success():
     _clear_rate_limit()
     from backend.main import app
     init_data = _make_init_data()
+    lobby_with_org = _mock_lobby()
+    lobby_with_org["organizer"] = _mock_organizer()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby", new_callable=lambda: AsyncMock(return_value=_mock_lobby())), \
-         patch("backend.main.get_organizer_info", new_callable=lambda: AsyncMock(return_value=_mock_organizer())):
+         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=lobby_with_org)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
                                headers={"X-Telegram-Init-Data": init_data})
@@ -366,17 +367,18 @@ async def test_get_lobby_success():
             assert "telegram_user_id" not in resp.json()
 
 @pytest.mark.asyncio
-async def test_get_lobby_passes_viewer_id():
+async def test_get_lobby_passes_lobby_id():
     _clear_rate_limit()
     from backend.main import app
+    from uuid import UUID
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby", new_callable=lambda: AsyncMock(return_value=None)) as mg:
+         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=None)) as mg:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             await c.get("/api/lobbies/00000000-0000-0000-0000-000000000099",
                         headers={"X-Telegram-Init-Data": init_data})
-        assert mg.call_args[1]["viewer_id"] == _mock_user()["id"]
+        assert mg.call_args[0][0] == UUID("00000000-0000-0000-0000-000000000099")
 
 @pytest.mark.asyncio
 async def test_list_lobbies_no_init_data():
@@ -579,10 +581,11 @@ async def test_get_lobby_no_telegram_pii():
     _clear_rate_limit()
     from backend.main import app
     init_data = _make_init_data()
+    lobby_with_org = _mock_lobby()
+    lobby_with_org["organizer"] = _mock_organizer()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby", new_callable=lambda: AsyncMock(return_value=_mock_lobby())), \
-         patch("backend.main.get_organizer_info", new_callable=lambda: AsyncMock(return_value=_mock_organizer())):
+         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=lobby_with_org)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             org = (await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
                                headers={"X-Telegram-Init-Data": init_data})).json().get("organizer", {})
@@ -786,7 +789,7 @@ async def test_get_lobby_inactive_organizer_404():
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby", new_callable=lambda: AsyncMock(return_value=None)):
+         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=None)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             assert (await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
                                 headers={"X-Telegram-Init-Data": init_data})).status_code == 404
@@ -834,26 +837,13 @@ async def test_update_lobby_other_user_open():
 
 
 @pytest.mark.asyncio
-async def test_cancel_lobby_other_user_open():
-    _clear_rate_limit()
-    from backend.main import app
-    init_data = _make_init_data()
-    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
-         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_other_user())), \
-         patch("backend.main.cancel_lobby", new_callable=lambda: AsyncMock(return_value={"error": "forbidden"})):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            assert (await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/cancel",
-                                 headers={"X-Telegram-Init-Data": init_data})).status_code == 403
-
-
-@pytest.mark.asyncio
 async def test_get_lobby_organizer_missing_404():
     _clear_rate_limit()
     from backend.main import app
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby", new_callable=lambda: AsyncMock(return_value=None)):
+         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=None)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             assert (await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
                                 headers={"X-Telegram-Init-Data": init_data})).status_code == 404
@@ -927,3 +917,112 @@ def test_cursor_pagination_stable():
 
     assert (ts1, str(id1)) < (ts2, str(id2))
     assert (d1_ts, d1_id) < (d2_ts, d2_id)
+
+
+# --- DB-mock owner-before-status tests ---
+from uuid import UUID
+
+
+class _FakeAsyncCtx:
+    def __init__(self, conn):
+        self._conn = conn
+    async def __aenter__(self):
+        return self._conn
+    async def __aexit__(self, *a):
+        pass
+
+
+class _FakeConn:
+    def __init__(self, fetchrow_return=None, fetchval_return=None):
+        self._fetchrow = fetchrow_return
+        self._fetchval = fetchval_return
+
+    async def fetchrow(self, sql, *args):
+        return self._fetchrow
+
+    async def fetchval(self, sql, *args):
+        return self._fetchval
+
+    async def fetch(self, sql, *args):
+        return [self._fetchrow] if self._fetchrow else []
+
+    async def execute(self, sql, *args):
+        return None
+
+    def transaction(self):
+        return _FakeAsyncCtx(self)
+
+    def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        pass
+
+
+class _FakePool:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def acquire(self):
+        return _FakeAsyncCtx(self._conn)
+
+
+def _make_existing_row(organizer_id="00000000-0000-0000-0000-000000000001", status="open"):
+    data = {"organizer_id": UUID(organizer_id), "status": status}
+    row = type("_Row", (), {"__getitem__": lambda s, k: data[k], "keys": lambda s: data.keys()})()
+    return row
+
+
+@pytest.mark.asyncio
+async def test_cancel_lobby_owner_before_status_closed_profile():
+    """Cancel checks owner first — closed profile of OTHER user → forbidden."""
+    from backend.lobbies import cancel_lobby
+    row = _make_existing_row(organizer_id="00000000-0000-0000-0000-000000000002", status="cancelled")
+    conn = _FakeConn(fetchrow_return=row)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await cancel_lobby(UUID("11111111-1111-1111-1111-111111111111"),
+                                     UUID("00000000-0000-0000-0000-000000000001"))
+        assert result == {"error": "forbidden"}
+
+
+@pytest.mark.asyncio
+async def test_update_lobby_owner_before_status():
+    """Update checks owner first — different owner → forbidden regardless of status."""
+    from backend.lobbies import update_lobby
+    for status in ("open", "cancelled", "completed"):
+        row = _make_existing_row(organizer_id="00000000-0000-0000-0000-000000000002", status=status)
+        conn = _FakeConn(fetchrow_return=row)
+        pool = _FakePool(conn)
+        with patch("backend.lobbies.get_db_pool", return_value=pool):
+            result = await update_lobby(UUID("11111111-1111-1111-1111-111111111111"),
+                                         UUID("00000000-0000-0000-0000-000000000001"),
+                                         {"title": "X"})
+            assert result == {"error": "forbidden"}, f"Failed for status={status}"
+
+
+@pytest.mark.asyncio
+async def test_cancel_lobby_owner_cancelled_idempotent():
+    """Owner cancelling already-cancelled lobby → returns existing row."""
+    from backend.lobbies import cancel_lobby
+    row = _make_existing_row(status="cancelled")
+    conn = _FakeConn(fetchrow_return=row)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await cancel_lobby(UUID("11111111-1111-1111-1111-111111111111"),
+                                     UUID("00000000-0000-0000-0000-000000000001"))
+        assert isinstance(result, dict)
+        assert result.get("status") == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_lobby_owner_completed_blocked():
+    """Owner cancelling completed lobby → 409 equivalent."""
+    from backend.lobbies import cancel_lobby
+    row = _make_existing_row(status="completed")
+    conn = _FakeConn(fetchrow_return=row)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await cancel_lobby(UUID("11111111-1111-1111-1111-111111111111"),
+                                     UUID("00000000-0000-0000-0000-000000000001"))
+        assert result == {"error": "lobby_not_cancellable"}
