@@ -246,3 +246,62 @@ async def test_send_message_error_no_token_in_log(caplog):
             await bot_mod.process_due_reminders_once(mock_bot)
 
     assert FAKE_TOKEN not in caplog.text
+
+
+def test_classify_bad_request():
+    from telegram.error import BadRequest
+    bot_mod = _reload_bot()
+    assert bot_mod._classify_send_error(BadRequest("bad")) == "telegram_api_error"
+
+
+@pytest.mark.asyncio
+async def test_reminder_worker_no_exc_info_in_log(caplog):
+    import asyncio
+    import logging
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot = MagicMock()
+
+    with patch("backend.database.init_db_pool", new_callable=AsyncMock), \
+         patch("backend.database.close_db_pool", new_callable=AsyncMock), \
+         patch("bot.process_due_reminders_once", new_callable=AsyncMock,
+               side_effect=RuntimeError("DB password=secret999 host=prod.db")):
+        with caplog.at_level(logging.ERROR, logger="bot"):
+            try:
+                await asyncio.wait_for(
+                    bot_mod.reminder_worker(mock_app), timeout=0.1
+                )
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+
+    assert any("Reminder worker iteration failed" in r.message for r in caplog.records)
+    assert "secret999" not in caplog.text
+    for record in caplog.records:
+        assert record.exc_info is None, "exc_info must not be set"
+
+
+@pytest.mark.asyncio
+async def test_reminder_worker_log_action_and_error_type(caplog):
+    import asyncio
+    import logging
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot = MagicMock()
+
+    with patch("backend.database.init_db_pool", new_callable=AsyncMock), \
+         patch("backend.database.close_db_pool", new_callable=AsyncMock), \
+         patch("bot.process_due_reminders_once", new_callable=AsyncMock,
+               side_effect=ValueError("something")):
+        with caplog.at_level(logging.ERROR, logger="bot"):
+            try:
+                await asyncio.wait_for(
+                    bot_mod.reminder_worker(mock_app), timeout=0.1
+                )
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+
+    error_records = [r for r in caplog.records if "Reminder worker" in r.message]
+    assert len(error_records) >= 1
+    msg = error_records[0].message
+    assert "action=worker_tick" in msg
+    assert "error_type=ValueError" in msg

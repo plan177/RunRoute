@@ -35,24 +35,20 @@ def _classify_send_error(exc: Exception) -> str:
     Never uses str(), repr(), or traceback -- only isinstance checks
     and exception class names.
     """
-    from telegram.error import Forbidden, TimedOut, NetworkError
+    from telegram.error import Forbidden, TimedOut, NetworkError, TelegramError, BadRequest
 
     if isinstance(exc, Forbidden):
         return "telegram_forbidden"
     if isinstance(exc, TimedOut):
         return "telegram_timeout"
+    if isinstance(exc, BadRequest):
+        return "telegram_api_error"
+    if isinstance(exc, TelegramError) and not isinstance(exc, (NetworkError, Forbidden)):
+        return "telegram_api_error"
     if isinstance(exc, NetworkError):
         return "telegram_network_error"
-
-    exc_name = type(exc).__name__
-    if "forbidden" in exc_name.lower():
-        return "telegram_forbidden"
-    if "timeout" in exc_name.lower():
-        return "telegram_timeout"
-    if "network" in exc_name.lower():
-        return "telegram_network_error"
-
     return "unexpected_error"
+
 
 
 
@@ -191,8 +187,8 @@ async def reminder_worker(app):
         while True:
             try:
                 await process_due_reminders_once(app.bot)
-            except Exception:
-                logger.error("Reminder worker iteration failed", exc_info=True)
+            except Exception as exc:
+                logger.error("Reminder worker iteration failed action=worker_tick error_type=%s", type(exc).__name__)
 
             await asyncio.sleep(WORKER_INTERVAL_SECONDS)
     finally:
