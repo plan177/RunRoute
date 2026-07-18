@@ -1847,6 +1847,7 @@ const {
     fetchCalendarData,
     validateSavedRouteForDisplay,
     classifyHttpError,
+    getOpenSavedRouteErrorMessage,
 } = window.RunRouteCalendarUtils;
 
 let calYear, calMonth, calSelectedDate, calRuns = [], calRoutes = [];
@@ -2308,23 +2309,39 @@ async function openSavedRoute(routeId) {
     const openBtn = routeCard ? routeCard.querySelector('.route-action-primary') : null;
     if (openBtn) { openBtn.disabled = true; openBtn.textContent = 'Загрузка…'; }
 
+    let modalClosed = false;
+    const modal = document.getElementById('calendar-modal');
+    const prevCurrentRoute = currentRoute;
+
     try {
         const resp = await fetch(apiUrl(buildRouteDetailUrl(routeId)), { headers: getApiHeaders() });
         if (!resp.ok) throw new Error(classifyHttpError(resp.status));
         const route = await resp.json();
         const validated = validateSavedRouteForDisplay(route);
+        const nextRoute = buildCurrentRouteFromApi(validated, makeGPX);
 
-        document.getElementById('calendar-modal').classList.add('hidden');
+        modal.classList.add('hidden');
+        modalClosed = true;
 
         await new Promise(r => { requestAnimationFrame(() => requestAnimationFrame(r)); });
         map.invalidateSize();
 
-        currentRoute = buildCurrentRouteFromApi(validated, makeGPX);
+        currentRoute = nextRoute;
         displayRoute(currentRoute);
         showRouteButtons('saved');
+
+        const mapElement = document.getElementById('map');
+        if (mapElement) {
+            mapElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
         showToast('Маршрут открыт');
     } catch (e) {
-        showToast(e.message || 'Не удалось загрузить маршрут');
+        if (modalClosed) {
+            modal.classList.remove('hidden');
+            currentRoute = prevCurrentRoute;
+        }
+        showToast(getOpenSavedRouteErrorMessage(e));
     } finally {
         if (openBtn) { openBtn.disabled = false; openBtn.textContent = 'Открыть'; }
     }

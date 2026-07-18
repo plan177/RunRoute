@@ -187,6 +187,20 @@
         return 'Не удалось загрузить маршрут';
     }
 
+    function getOpenSavedRouteErrorMessage(error) {
+        if (!error) return 'Не удалось открыть маршрут';
+        const msg = error.message;
+        if (msg === 'Маршрут содержит некорректные данные') return msg;
+        if (msg === 'Не удалось подтвердить авторизацию Telegram') return msg;
+        if (msg === 'Маршрут не найден') return msg;
+        if (msg === 'Сервис временно недоступен') return msg;
+        if (msg === 'Не удалось загрузить маршрут') return msg;
+        if (msg && msg.includes('Failed to fetch')) return 'Не удалось подключиться к серверу';
+        if (msg && msg.includes('NetworkError')) return 'Не удалось подключиться к серверу';
+        if (msg && msg.includes('network')) return 'Не удалось подключиться к серверу';
+        return 'Не удалось открыть маршрут';
+    }
+
     /**
      * Process two raw fetch results (responses or errors) for calendar data.
      * Returns { runs, routes, runsError, routesError }.
@@ -260,6 +274,7 @@
         buildCalendarRunsUrl,
         fetchCalendarData,
         validateSavedRouteForDisplay,
-        classifyHttpError
+        classifyHttpError,
+        getOpenSavedRouteErrorMessage
     };
 });

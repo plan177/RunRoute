@@ -15,7 +15,7 @@ const {
     isSameDay, getRunDayKey, buildCreateRunPayload, buildUpdateRunPayload,
     buildUpdateRunUrl, buildSaveRoutePayload, validatePointsCount,
     buildCurrentRouteFromApi, buildCalendarRunsUrl, fetchCalendarData,
-    validateSavedRouteForDisplay, classifyHttpError,
+    validateSavedRouteForDisplay, classifyHttpError, getOpenSavedRouteErrorMessage,
 } = ctx.RunRouteCalendarUtils || ctx.module.exports;
 
 // Also read production files for regression checks
@@ -994,94 +994,199 @@ describe('buildCurrentRouteFromApi', () => {
 // --- openSavedRoute integration ---
 
 describe('openSavedRoute integration', () => {
+    function getOpenSavedRouteBody() {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnEnd = appJs.indexOf('\nfunction renameSavedRoute');
+        return appJs.substring(fnStart, fnEnd);
+    }
+
     it('uses buildRouteDetailUrl', () => {
-        assert.ok(appJs.includes('buildRouteDetailUrl(routeId)'),
+        assert.ok(getOpenSavedRouteBody().includes('buildRouteDetailUrl(routeId)'),
             'openSavedRoute must use buildRouteDetailUrl');
     });
 
     it('closes calendar-modal', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(fnBody.includes("calendar-modal').classList.add('hidden')"),
+        assert.ok(getOpenSavedRouteBody().includes("modal.classList.add('hidden')"),
             'must close calendar-modal');
     });
 
     it('calls map.invalidateSize', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(fnBody.includes('map.invalidateSize()'),
+        assert.ok(getOpenSavedRouteBody().includes('map.invalidateSize()'),
             'must call map.invalidateSize');
     });
 
     it('calls displayRoute', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(fnBody.includes('displayRoute(currentRoute)'),
+        assert.ok(getOpenSavedRouteBody().includes('displayRoute(currentRoute)'),
             'must call displayRoute');
     });
 
     it('calls showRouteButtons saved', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(fnBody.includes("showRouteButtons('saved')"),
+        assert.ok(getOpenSavedRouteBody().includes("showRouteButtons('saved')"),
             'must call showRouteButtons with saved');
     });
 
     it('shows toast on success', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(fnBody.includes("Маршрут открыт"),
+        assert.ok(getOpenSavedRouteBody().includes("Маршрут открыт"),
             'must show success toast');
     });
 
     it('disables button during load', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(fnBody.includes('openBtn.disabled = true'),
+        assert.ok(getOpenSavedRouteBody().includes('openBtn.disabled = true'),
             'must disable button');
     });
 
     it('restores button in finally', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(fnBody.includes("openBtn.disabled = false") && fnBody.includes("openBtn.textContent = 'Открыть'"),
+        assert.ok(getOpenSavedRouteBody().includes("openBtn.disabled = false") && getOpenSavedRouteBody().includes("openBtn.textContent = 'Открыть'"),
             'must restore button in finally');
     });
 
     it('does not call Valhalla or generateAutoRoute', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(!fnBody.includes('valhallaRoute'),
+        assert.ok(!getOpenSavedRouteBody().includes('valhallaRoute'),
             'must not call valhallaRoute');
-        assert.ok(!fnBody.includes('generateAutoRoute'),
+        assert.ok(!getOpenSavedRouteBody().includes('generateAutoRoute'),
             'must not call generateAutoRoute');
     });
 
     it('does not change routeMode', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(!fnBody.includes('routeMode ='),
+        assert.ok(!getOpenSavedRouteBody().includes('routeMode ='),
             'must not change routeMode');
     });
 
     it('uses requestAnimationFrame for layout wait', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(fnBody.includes('requestAnimationFrame'),
+        assert.ok(getOpenSavedRouteBody().includes('requestAnimationFrame'),
             'must use requestAnimationFrame for layout');
     });
 
     it('validates route with validateSavedRouteForDisplay', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(fnBody.includes('validateSavedRouteForDisplay'),
+        assert.ok(getOpenSavedRouteBody().includes('validateSavedRouteForDisplay'),
             'must call validateSavedRouteForDisplay');
     });
 
     it('uses classifyHttpError for error messages', () => {
-        const fnStart = appJs.indexOf('async function openSavedRoute');
-        const fnBody = appJs.substring(fnStart, fnStart + 1500);
-        assert.ok(fnBody.includes('classifyHttpError'),
+        assert.ok(getOpenSavedRouteBody().includes('classifyHttpError'),
             'must use classifyHttpError');
+    });
+
+    it('uses scrollIntoView after displayRoute', () => {
+        assert.ok(getOpenSavedRouteBody().includes('scrollIntoView'),
+            'must call scrollIntoView');
+    });
+
+    it('scrollIntoView uses smooth behavior and center block', () => {
+        const body = getOpenSavedRouteBody();
+        assert.ok(body.includes("behavior: 'smooth'") || body.includes("behavior:'smooth'"),
+            'must use smooth behavior');
+        assert.ok(body.includes("block: 'center'") || body.includes("block:'center'"),
+            'must use center block');
+    });
+
+    it('uses getOpenSavedRouteErrorMessage instead of e.message', () => {
+        const body = getOpenSavedRouteBody();
+        assert.ok(body.includes('getOpenSavedRouteErrorMessage'),
+            'must use getOpenSavedRouteErrorMessage');
+        const catchIdx = body.indexOf('catch (e)');
+        const catchBody = body.substring(catchIdx, catchIdx + 300);
+        assert.ok(!catchBody.includes('e.message'),
+            'must not show raw e.message');
+    });
+
+    it('validates and builds nextRoute before closing modal', () => {
+        const body = getOpenSavedRouteBody();
+        const validatedIdx = body.indexOf('validateSavedRouteForDisplay');
+        const buildIdx = body.indexOf('buildCurrentRouteFromApi');
+        const modalIdx = body.indexOf("modal.classList.add('hidden')");
+        assert.ok(validatedIdx < modalIdx,
+            'validation must happen before modal close');
+        assert.ok(buildIdx < modalIdx,
+            'buildCurrentRouteFromApi must happen before modal close');
+    });
+
+    it('restores calendar-modal on error after close', () => {
+        const body = getOpenSavedRouteBody();
+        assert.ok(body.includes("modalClosed") && body.includes("modal.classList.remove('hidden')"),
+            'must restore modal on error after close');
+    });
+
+    it('preserves previous currentRoute on error', () => {
+        const body = getOpenSavedRouteBody();
+        assert.ok(body.includes('prevCurrentRoute') && body.includes('currentRoute = prevCurrentRoute'),
+            'must restore previous currentRoute on error');
+    });
+});
+
+
+// --- getOpenSavedRouteErrorMessage ---
+
+describe('getOpenSavedRouteErrorMessage', () => {
+    it('validation error returns exact message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('Маршрут содержит некорректные данные')),
+            'Маршрут содержит некорректные данные'
+        );
+    });
+
+    it('HTTP 401 returns auth message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('Не удалось подтвердить авторизацию Telegram')),
+            'Не удалось подтвердить авторизацию Telegram'
+        );
+    });
+
+    it('HTTP 404 returns not found message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('Маршрут не найден')),
+            'Маршрут не найден'
+        );
+    });
+
+    it('HTTP 500 returns server message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('Сервис временно недоступен')),
+            'Сервис временно недоступен'
+        );
+    });
+
+    it('Failed to fetch becomes network message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('Failed to fetch')),
+            'Не удалось подключиться к серверу'
+        );
+    });
+
+    it('NetworkError becomes network message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('NetworkError')),
+            'Не удалось подключиться к серверу'
+        );
+    });
+
+    it('unknown error returns safe fallback', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('something unexpected')),
+            'Не удалось открыть маршрут'
+        );
+    });
+
+    it('null error returns safe fallback', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(null),
+            'Не удалось открыть маршрут'
+        );
+    });
+
+    it('undefined error returns safe fallback', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(undefined),
+            'Не удалось открыть маршрут'
+        );
+    });
+
+    it('never exposes raw error.message to user', () => {
+        const dangerous = new Error('password=secret123 host=db.example.com');
+        const result = getOpenSavedRouteErrorMessage(dangerous);
+        assert.ok(!result.includes('password=secret123'),
+            'must not leak exception details');
+        assert.ok(!result.includes('db.example.com'),
+            'must not leak host details');
     });
 });
