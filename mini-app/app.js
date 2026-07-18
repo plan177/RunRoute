@@ -1843,6 +1843,7 @@ const {
     buildRouteUpdateUrl,
     buildRouteDeleteUrl,
     buildCurrentRouteFromApi,
+    buildCalendarRunsUrl,
 } = window.RunRouteCalendarUtils;
 
 let calYear, calMonth, calSelectedDate, calRuns = [], calRoutes = [];
@@ -1895,12 +1896,15 @@ async function loadCalendarData() {
     const to = calGetMonthEnd(calYear, calMonth);
     try {
         const [runsResp, routesResp] = await Promise.all([
-            fetch(apiUrl(`/api/calendar/runs?from=${from}&to=${to}`), { headers: getApiHeaders() }),
+            fetch(apiUrl(buildCalendarRunsUrl(from, to)), { headers: getApiHeaders() }),
             fetch(apiUrl('/api/routes'), { headers: getApiHeaders() }),
         ]);
         if (seq !== calRequestSeq) return;
 
-        if (!runsResp.ok) {
+        if (runsResp.ok) {
+            const runsData = await runsResp.json();
+            calRuns = runsData.runs || [];
+        } else {
             calRuns = [];
             if (runsResp.status === 401) throw new Error('auth');
             if (runsResp.status === 404) throw new Error('not_found');
@@ -1908,15 +1912,12 @@ async function loadCalendarData() {
             throw new Error('unknown');
         }
 
-        const runsData = await runsResp.json();
-        calRuns = runsData.runs || [];
         if (routesResp.ok) {
             const routesData = await routesResp.json();
-            calRoutes = routesData.routes || [];
+            calRoutes = dedupRoutesById(routesData.routes || []);
         }
     } catch (e) {
         if (seq !== calRequestSeq) return;
-        calRuns = [];
         if (e.message === 'auth' || e.message === 'not_found' || e.message === 'server' || e.message === 'unknown') {
             throw e;
         }

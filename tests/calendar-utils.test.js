@@ -14,7 +14,7 @@ const {
     getMonthStart, getMonthEnd, formatDatetimeLocal, datetimeLocalToISO,
     isSameDay, getRunDayKey, buildCreateRunPayload, buildUpdateRunPayload,
     buildUpdateRunUrl, buildSaveRoutePayload, validatePointsCount,
-    buildCurrentRouteFromApi,
+    buildCurrentRouteFromApi, buildCalendarRunsUrl,
 } = ctx.RunRouteCalendarUtils || ctx.module.exports;
 
 // Also read production files for regression checks
@@ -626,5 +626,69 @@ describe('saved route viewing production code regression', () => {
         const body = fn.substring(0, endIdx > 0 ? endIdx : 2000);
         assert.ok(!body.includes('/* silent */'),
             'delete must not silently swallow errors');
+    });
+});
+
+
+// --- Production bugfix: calendar URL encoding ---
+
+describe('buildCalendarRunsUrl', () => {
+    it('encodes + in timezone offset as %2B', () => {
+        const url = buildCalendarRunsUrl(
+            '2026-07-01T00:00:00+03:00',
+            '2026-07-31T23:59:59+03:00'
+        );
+        assert.ok(url.includes('%2B03%3A00'),
+            'URL must encode + as %2B: ' + url);
+    });
+
+    it('round-trips +03:00 correctly', () => {
+        const from = '2026-07-01T00:00:00+03:00';
+        const to = '2026-07-31T23:59:59+03:00';
+        const url = buildCalendarRunsUrl(from, to);
+        const params = new URLSearchParams(url.split('?')[1]);
+        assert.equal(params.get('from'), from);
+        assert.equal(params.get('to'), to);
+    });
+
+    it('preserves UTC Z timezone', () => {
+        const url = buildCalendarRunsUrl(
+            '2026-07-01T00:00:00Z',
+            '2026-07-31T23:59:59Z'
+        );
+        assert.ok(url.includes('from=2026-07-01'), 'must contain from param');
+        assert.ok(url.includes('to=2026-07-31'), 'must contain to param');
+    });
+});
+
+describe('calendar partial availability', () => {
+    it('app.js loads runs and routes via Promise.all', () => {
+        assert.ok(appJs.includes('Promise.all'),
+            'loadCalendarData must use Promise.all');
+    });
+
+    it('routes are stored even when runs fail', () => {
+        const fnStart = appJs.indexOf('async function loadCalendarData');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('routesResp.ok'),
+            'must check routesResp.ok independently');
+    });
+
+    it('routes use dedupRoutesById', () => {
+        const fnStart = appJs.indexOf('async function loadCalendarData');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('dedupRoutesById'),
+            'must deduplicate routes');
+    });
+
+    it('app.js uses buildCalendarRunsUrl', () => {
+        assert.ok(appJs.includes('buildCalendarRunsUrl'),
+            'app.js must use buildCalendarRunsUrl');
+    });
+
+    it('app.js destructures buildCalendarRunsUrl', () => {
+        assert.ok(appJs.includes('buildCalendarRunsUrl') &&
+                  appJs.includes('RunRouteCalendarUtils'),
+            'must import buildCalendarRunsUrl');
     });
 });

@@ -141,6 +141,10 @@
         };
     }
 
+    function buildCalendarRunsUrl(from, to) {
+        return '/api/calendar/runs?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to);
+    }
+
     return {
         getMonthStart,
         getMonthEnd,
@@ -160,6 +164,7 @@
         buildRouteDetailUrl,
         buildRouteUpdateUrl,
         buildRouteDeleteUrl,
-        buildCurrentRouteFromApi
+        buildCurrentRouteFromApi,
+        buildCalendarRunsUrl
     };
 });
