@@ -15,6 +15,7 @@ const {
     isSameDay, getRunDayKey, buildCreateRunPayload, buildUpdateRunPayload,
     buildUpdateRunUrl, buildSaveRoutePayload, validatePointsCount,
     buildCurrentRouteFromApi, buildCalendarRunsUrl, fetchCalendarData,
+    validateSavedRouteForDisplay, classifyHttpError, getOpenSavedRouteErrorMessage,
 } = ctx.RunRouteCalendarUtils || ctx.module.exports;
 
 // Also read production files for regression checks
@@ -876,5 +877,316 @@ describe('loadCalendarData integration', () => {
     it('index.html has cal-runs-status element', () => {
         assert.ok(indexHtml.includes('id="cal-runs-status"'),
             'index.html must contain cal-runs-status');
+    });
+});
+
+
+// --- validateSavedRouteForDisplay ---
+
+describe('validateSavedRouteForDisplay', () => {
+    it('accepts valid auto route', () => {
+        const route = { id: 'r1', name: 'Test', route_mode: 'auto', distance_m: 5000, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] };
+        const result = validateSavedRouteForDisplay(route);
+        assert.equal(result.id, 'r1');
+        assert.equal(result.route_mode, 'auto');
+        assert.equal(result.points.length, 2);
+    });
+
+    it('accepts valid manual route', () => {
+        const route = { id: 'r2', name: 'Manual', route_mode: 'manual', distance_m: 3000, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] };
+        const result = validateSavedRouteForDisplay(route);
+        assert.equal(result.route_mode, 'manual');
+    });
+
+    it('preserves time and accuracy for GPS track', () => {
+        const route = { id: 'r3', name: 'Track', route_mode: 'track', distance_m: 2000, points: [{ lat: 55.7, lng: 37.6, time: '2026-01-01T10:00:00Z', accuracy: 5 }, { lat: 55.8, lng: 37.7, time: '2026-01-01T10:05:00Z', accuracy: 3 }] };
+        const result = validateSavedRouteForDisplay(route);
+        assert.equal(result.route_mode, 'track');
+        assert.equal(result.points[0].time, '2026-01-01T10:00:00Z');
+        assert.equal(result.points[0].accuracy, 5);
+    });
+
+    it('rejects less than 2 points', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: 100, points: [{ lat: 55.7, lng: 37.6 }] }));
+    });
+
+    it('rejects missing points', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: 100 }));
+    });
+
+    it('rejects NaN in lat', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: 100, points: [{ lat: NaN, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('rejects Infinity in lng', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: 100, points: [{ lat: 55.7, lng: Infinity }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('rejects string lat', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: 100, points: [{ lat: '55.7', lng: 37.6 }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('rejects invalid route_mode', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'invalid', distance_m: 100, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('rejects negative distance_m', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: -100, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('rejects missing id', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ name: 'X', route_mode: 'auto', distance_m: 100, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('does not mutate original route', () => {
+        const route = { id: 'r1', name: 'Test', route_mode: 'auto', distance_m: 5000, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] };
+        const origPoints = route.points;
+        validateSavedRouteForDisplay(route);
+        assert.equal(route.points, origPoints);
+    });
+});
+
+
+// --- classifyHttpError ---
+
+describe('classifyHttpError', () => {
+    it('401 returns auth message', () => {
+        assert.equal(classifyHttpError(401), 'Не удалось подтвердить авторизацию Telegram');
+    });
+    it('404 returns not found message', () => {
+        assert.equal(classifyHttpError(404), 'Маршрут не найден');
+    });
+    it('500 returns server message', () => {
+        assert.equal(classifyHttpError(500), 'Сервис временно недоступен');
+    });
+    it('502 returns server message', () => {
+        assert.equal(classifyHttpError(502), 'Сервис временно недоступен');
+    });
+    it('400 returns generic message', () => {
+        assert.equal(classifyHttpError(400), 'Не удалось загрузить маршрут');
+    });
+});
+
+
+// --- buildCurrentRouteFromApi ---
+
+describe('buildCurrentRouteFromApi', () => {
+    it('preserves source and saved_route_id', () => {
+        const apiRoute = { id: 'r1', name: 'Test', route_mode: 'auto', distance_m: 5000, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] };
+        const result = buildCurrentRouteFromApi(apiRoute, () => 'gpx-data');
+        assert.equal(result.source, 'saved');
+        assert.equal(result.saved_route_id, 'r1');
+        assert.equal(result.name, 'Test');
+        assert.equal(result.route_mode, 'auto');
+        assert.equal(result.distance_km, 5);
+        assert.equal(result.gpx, 'gpx-data');
+    });
+
+    it('does not mutate original points', () => {
+        const pts = [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }];
+        const apiRoute = { id: 'r1', name: 'Test', route_mode: 'auto', distance_m: 5000, points: pts };
+        buildCurrentRouteFromApi(apiRoute, () => 'gpx');
+        assert.equal(pts[0].lat, 55.7);
+    });
+});
+
+
+// --- openSavedRoute integration ---
+
+describe('openSavedRoute integration', () => {
+    function getOpenSavedRouteBody() {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnEnd = appJs.indexOf('\nfunction renameSavedRoute');
+        return appJs.substring(fnStart, fnEnd);
+    }
+
+    it('uses buildRouteDetailUrl', () => {
+        assert.ok(getOpenSavedRouteBody().includes('buildRouteDetailUrl(routeId)'),
+            'openSavedRoute must use buildRouteDetailUrl');
+    });
+
+    it('closes calendar-modal', () => {
+        assert.ok(getOpenSavedRouteBody().includes("modal.classList.add('hidden')"),
+            'must close calendar-modal');
+    });
+
+    it('calls map.invalidateSize', () => {
+        assert.ok(getOpenSavedRouteBody().includes('map.invalidateSize()'),
+            'must call map.invalidateSize');
+    });
+
+    it('calls displayRoute', () => {
+        assert.ok(getOpenSavedRouteBody().includes('displayRoute(currentRoute)'),
+            'must call displayRoute');
+    });
+
+    it('calls showRouteButtons saved', () => {
+        assert.ok(getOpenSavedRouteBody().includes("showRouteButtons('saved')"),
+            'must call showRouteButtons with saved');
+    });
+
+    it('shows toast on success', () => {
+        assert.ok(getOpenSavedRouteBody().includes("Маршрут открыт"),
+            'must show success toast');
+    });
+
+    it('disables button during load', () => {
+        assert.ok(getOpenSavedRouteBody().includes('openBtn.disabled = true'),
+            'must disable button');
+    });
+
+    it('restores button in finally', () => {
+        assert.ok(getOpenSavedRouteBody().includes("openBtn.disabled = false") && getOpenSavedRouteBody().includes("openBtn.textContent = 'Открыть'"),
+            'must restore button in finally');
+    });
+
+    it('does not call Valhalla or generateAutoRoute', () => {
+        assert.ok(!getOpenSavedRouteBody().includes('valhallaRoute'),
+            'must not call valhallaRoute');
+        assert.ok(!getOpenSavedRouteBody().includes('generateAutoRoute'),
+            'must not call generateAutoRoute');
+    });
+
+    it('does not change routeMode', () => {
+        assert.ok(!getOpenSavedRouteBody().includes('routeMode ='),
+            'must not change routeMode');
+    });
+
+    it('uses requestAnimationFrame for layout wait', () => {
+        assert.ok(getOpenSavedRouteBody().includes('requestAnimationFrame'),
+            'must use requestAnimationFrame for layout');
+    });
+
+    it('validates route with validateSavedRouteForDisplay', () => {
+        assert.ok(getOpenSavedRouteBody().includes('validateSavedRouteForDisplay'),
+            'must call validateSavedRouteForDisplay');
+    });
+
+    it('uses classifyHttpError for error messages', () => {
+        assert.ok(getOpenSavedRouteBody().includes('classifyHttpError'),
+            'must use classifyHttpError');
+    });
+
+    it('uses scrollIntoView after displayRoute', () => {
+        assert.ok(getOpenSavedRouteBody().includes('scrollIntoView'),
+            'must call scrollIntoView');
+    });
+
+    it('scrollIntoView uses smooth behavior and center block', () => {
+        const body = getOpenSavedRouteBody();
+        assert.ok(body.includes("behavior: 'smooth'") || body.includes("behavior:'smooth'"),
+            'must use smooth behavior');
+        assert.ok(body.includes("block: 'center'") || body.includes("block:'center'"),
+            'must use center block');
+    });
+
+    it('uses getOpenSavedRouteErrorMessage instead of e.message', () => {
+        const body = getOpenSavedRouteBody();
+        assert.ok(body.includes('getOpenSavedRouteErrorMessage'),
+            'must use getOpenSavedRouteErrorMessage');
+        const catchIdx = body.indexOf('catch (e)');
+        const catchBody = body.substring(catchIdx, catchIdx + 300);
+        assert.ok(!catchBody.includes('e.message'),
+            'must not show raw e.message');
+    });
+
+    it('validates and builds nextRoute before closing modal', () => {
+        const body = getOpenSavedRouteBody();
+        const validatedIdx = body.indexOf('validateSavedRouteForDisplay');
+        const buildIdx = body.indexOf('buildCurrentRouteFromApi');
+        const modalIdx = body.indexOf("modal.classList.add('hidden')");
+        assert.ok(validatedIdx < modalIdx,
+            'validation must happen before modal close');
+        assert.ok(buildIdx < modalIdx,
+            'buildCurrentRouteFromApi must happen before modal close');
+    });
+
+    it('restores calendar-modal on error after close', () => {
+        const body = getOpenSavedRouteBody();
+        assert.ok(body.includes("modalClosed") && body.includes("modal.classList.remove('hidden')"),
+            'must restore modal on error after close');
+    });
+
+    it('preserves previous currentRoute on error', () => {
+        const body = getOpenSavedRouteBody();
+        assert.ok(body.includes('prevCurrentRoute') && body.includes('currentRoute = prevCurrentRoute'),
+            'must restore previous currentRoute on error');
+    });
+});
+
+
+// --- getOpenSavedRouteErrorMessage ---
+
+describe('getOpenSavedRouteErrorMessage', () => {
+    it('validation error returns exact message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('Маршрут содержит некорректные данные')),
+            'Маршрут содержит некорректные данные'
+        );
+    });
+
+    it('HTTP 401 returns auth message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('Не удалось подтвердить авторизацию Telegram')),
+            'Не удалось подтвердить авторизацию Telegram'
+        );
+    });
+
+    it('HTTP 404 returns not found message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('Маршрут не найден')),
+            'Маршрут не найден'
+        );
+    });
+
+    it('HTTP 500 returns server message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('Сервис временно недоступен')),
+            'Сервис временно недоступен'
+        );
+    });
+
+    it('Failed to fetch becomes network message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('Failed to fetch')),
+            'Не удалось подключиться к серверу'
+        );
+    });
+
+    it('NetworkError becomes network message', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('NetworkError')),
+            'Не удалось подключиться к серверу'
+        );
+    });
+
+    it('unknown error returns safe fallback', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(new Error('something unexpected')),
+            'Не удалось открыть маршрут'
+        );
+    });
+
+    it('null error returns safe fallback', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(null),
+            'Не удалось открыть маршрут'
+        );
+    });
+
+    it('undefined error returns safe fallback', () => {
+        assert.equal(
+            getOpenSavedRouteErrorMessage(undefined),
+            'Не удалось открыть маршрут'
+        );
+    });
+
+    it('never exposes raw error.message to user', () => {
+        const dangerous = new Error('password=secret123 host=db.example.com');
+        const result = getOpenSavedRouteErrorMessage(dangerous);
+        assert.ok(!result.includes('password=secret123'),
+            'must not leak exception details');
+        assert.ok(!result.includes('db.example.com'),
+            'must not leak host details');
     });
 });

@@ -1845,6 +1845,9 @@ const {
     buildCurrentRouteFromApi,
     buildCalendarRunsUrl,
     fetchCalendarData,
+    validateSavedRouteForDisplay,
+    classifyHttpError,
+    getOpenSavedRouteErrorMessage,
 } = window.RunRouteCalendarUtils;
 
 let calYear, calMonth, calSelectedDate, calRuns = [], calRoutes = [];
@@ -2301,19 +2304,46 @@ function renderSavedRoutes() {
 
 async function openSavedRoute(routeId) {
     if (!isTelegramApp()) return;
+
+    const routeCard = document.querySelector('[data-route-id="' + routeId + '"]');
+    const openBtn = routeCard ? routeCard.querySelector('.route-action-primary') : null;
+    if (openBtn) { openBtn.disabled = true; openBtn.textContent = 'Загрузка…'; }
+
+    let modalClosed = false;
+    const modal = document.getElementById('calendar-modal');
+    const prevCurrentRoute = currentRoute;
+
     try {
         const resp = await fetch(apiUrl(buildRouteDetailUrl(routeId)), { headers: getApiHeaders() });
-        if (!resp.ok) throw new Error('load');
+        if (!resp.ok) throw new Error(classifyHttpError(resp.status));
         const route = await resp.json();
-        if (!route.points || route.points.length < 2) throw new Error('empty');
+        const validated = validateSavedRouteForDisplay(route);
+        const nextRoute = buildCurrentRouteFromApi(validated, makeGPX);
 
-        document.getElementById('calendar-modal').classList.add('hidden');
+        modal.classList.add('hidden');
+        modalClosed = true;
 
-        currentRoute = buildCurrentRouteFromApi(route, makeGPX);
+        await new Promise(r => { requestAnimationFrame(() => requestAnimationFrame(r)); });
+        map.invalidateSize();
+
+        currentRoute = nextRoute;
         displayRoute(currentRoute);
         showRouteButtons('saved');
+
+        const mapElement = document.getElementById('map');
+        if (mapElement) {
+            mapElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        showToast('Маршрут открыт');
     } catch (e) {
-        showToast('Не удалось загрузить маршрут');
+        if (modalClosed) {
+            modal.classList.remove('hidden');
+            currentRoute = prevCurrentRoute;
+        }
+        showToast(getOpenSavedRouteErrorMessage(e));
+    } finally {
+        if (openBtn) { openBtn.disabled = false; openBtn.textContent = 'Открыть'; }
     }
 }
 

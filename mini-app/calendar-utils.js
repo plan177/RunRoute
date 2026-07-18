@@ -145,6 +145,62 @@
         return '/api/calendar/runs?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to);
     }
 
+    function validateSavedRouteForDisplay(route) {
+        if (!route || typeof route !== 'object') {
+            throw new Error('Маршрут содержит некорректные данные');
+        }
+        if (route.id == null) {
+            throw new Error('Маршрут содержит некорректные данные');
+        }
+        if (!Array.isArray(route.points)) {
+            throw new Error('Маршрут содержит некорректные данные');
+        }
+        if (route.points.length < 2) {
+            throw new Error('Маршрут содержит некорректные данные');
+        }
+        for (const p of route.points) {
+            if (typeof p.lat !== 'number' || typeof p.lng !== 'number' ||
+                !isFinite(p.lat) || !isFinite(p.lng)) {
+                throw new Error('Маршрут содержит некорректные данные');
+            }
+        }
+        if (route.distance_m == null || typeof route.distance_m !== 'number' || route.distance_m < 0 || !isFinite(route.distance_m)) {
+            throw new Error('Маршрут содержит некорректные данные');
+        }
+        const validModes = { auto: true, manual: true, track: true };
+        if (!validModes[route.route_mode]) {
+            throw new Error('Маршрут содержит некорректные данные');
+        }
+        return {
+            id: route.id,
+            name: route.name || '',
+            route_mode: route.route_mode,
+            distance_m: route.distance_m,
+            points: route.points,
+        };
+    }
+
+    function classifyHttpError(status) {
+        if (status === 401) return 'Не удалось подтвердить авторизацию Telegram';
+        if (status === 404) return 'Маршрут не найден';
+        if (status >= 500) return 'Сервис временно недоступен';
+        return 'Не удалось загрузить маршрут';
+    }
+
+    function getOpenSavedRouteErrorMessage(error) {
+        if (!error) return 'Не удалось открыть маршрут';
+        const msg = error.message;
+        if (msg === 'Маршрут содержит некорректные данные') return msg;
+        if (msg === 'Не удалось подтвердить авторизацию Telegram') return msg;
+        if (msg === 'Маршрут не найден') return msg;
+        if (msg === 'Сервис временно недоступен') return msg;
+        if (msg === 'Не удалось загрузить маршрут') return msg;
+        if (msg && msg.includes('Failed to fetch')) return 'Не удалось подключиться к серверу';
+        if (msg && msg.includes('NetworkError')) return 'Не удалось подключиться к серверу';
+        if (msg && msg.includes('network')) return 'Не удалось подключиться к серверу';
+        return 'Не удалось открыть маршрут';
+    }
+
     /**
      * Process two raw fetch results (responses or errors) for calendar data.
      * Returns { runs, routes, runsError, routesError }.
@@ -216,6 +272,9 @@
         buildRouteDeleteUrl,
         buildCurrentRouteFromApi,
         buildCalendarRunsUrl,
-        fetchCalendarData
+        fetchCalendarData,
+        validateSavedRouteForDisplay,
+        classifyHttpError,
+        getOpenSavedRouteErrorMessage
     };
 });
