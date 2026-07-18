@@ -588,3 +588,16 @@ class RunLobbyUpdate(BaseModel):
         return v
 
     model_config = {"extra": "forbid"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_null_required_fields(cls, data):
+        if isinstance(data, dict):
+            null_required = {
+                "title", "run_type", "starts_at", "city",
+                "meeting_lat", "meeting_lng", "capacity",
+            }
+            for field in null_required:
+                if field in data and data[field] is None:
+                    raise ValueError(f"{field} cannot be null")
+        return data
