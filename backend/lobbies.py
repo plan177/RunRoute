@@ -1,4 +1,5 @@
 import base64
+import binascii
 import json
 import logging
 from datetime import datetime, timezone
@@ -43,7 +44,7 @@ def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
         padding = 4 - len(cursor) % 4
         if padding != 4:
             cursor += "=" * padding
-        decoded = base64.urlsafe_b64decode(cursor.encode())
+        decoded = base64.b64decode(cursor.encode(), altchars=b"-_", validate=True)
         payload = json.loads(decoded)
         if not isinstance(payload, dict):
             raise ValueError("Invalid cursor")
@@ -56,7 +57,7 @@ def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
             raise ValueError("Invalid cursor")
         lobby_id = UUID(payload["i"])
         return starts_at, lobby_id
-    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError, binascii.Error):
         raise ValueError("Invalid cursor")
 
 

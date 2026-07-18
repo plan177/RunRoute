@@ -1112,3 +1112,47 @@ async def test_list_lobbies_malformed_cursor_returns_400():
                                headers={"X-Telegram-Init-Data": init_data})
             assert resp.status_code == 400
             assert resp.json()["detail"] == "Invalid cursor"
+
+
+def test_decode_cursor_single_char_triggers_binascii_error():
+    """cursor='a' has 1 data character — strict base64 rejects it via binascii.Error."""
+    from backend.lobbies import _decode_cursor
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        _decode_cursor("a")
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_single_char_cursor_returns_400():
+    """GET /api/lobbies?cursor=a must return 400, not 500."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/lobbies?cursor=a",
+                               headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 400
+            assert resp.json()["detail"] == "Invalid cursor"
+
+
+def test_decode_cursor_invalid_base64_strict_rejects_non_alphabet():
+    """Characters like !, @, # are not in base64 alphabet — strict mode rejects them."""
+    from backend.lobbies import _decode_cursor
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        _decode_cursor("!!!not-base64!!!")
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_invalid_base64_chars_returns_400():
+    """GET /api/lobbies?cursor=!!!not-base64!!! must return 400."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/lobbies?cursor=!!!not-base64!!!",
+                               headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 400
+            assert resp.json()["detail"] == "Invalid cursor"
