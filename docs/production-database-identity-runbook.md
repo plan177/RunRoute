@@ -31,7 +31,7 @@ Database pool initialized
 
 Логи из другого environment или устаревший deployment не отражают текущее состояние production-БД.
 
-**Ключевой факт:** `config.py:26-35` нормализует `postgres://` → `postgresql://`, что типично для Supabase pooler URLs. Сам URL хранится в `SecretStr` и никогда не логируется.
+**Ключевой факт:** `config.py:26-35` нормализует `postgres://` → `postgresql://`, что типично для Supabase pooler URLs. `config.py` хранит `DATABASE_URL` в `SecretStr` и сам не выводит его в лог. Это не отменяет необходимости не логировать исключения, argv, environment и значения connection string в другом коде.
 
 ---
 
@@ -72,13 +72,30 @@ Database pool initialized
 | порт | Число после `:` | `5432` (direct / session pooler), `6543` (transaction pooler) |
 | username | Часть до `@` | Может содержать `postgres.<ref>` |
 
-**Формат Supabase URL:**
+**Форматы Supabase URL:**
 
+Direct connection:
 ```
-postgresql://postgres.<PROJECT_REF>:<PASSWORD>@<HOST>:<PORT>/<DATABASE>
+postgresql://postgres:<PASSWORD>@db.<PROJECT_REF>.supabase.co:5432/postgres
+```
+
+Session pooler:
+```
+postgresql://postgres.<PROJECT_REF>:<PASSWORD>@<POOLER_HOST>:5432/postgres
+```
+
+Transaction pooler:
+```
+postgresql://postgres.<PROJECT_REF>:<PASSWORD>@<POOLER_HOST>:6543/postgres
 ```
 
 Ожидаемый PROJECT_REF: `siquoydstcdbkxvcmbzu`
+
+**Где находится project ref:**
+
+- У direct connection project ref находится в hostname (`db.<ref>.supabase.co`)
+- У pooler project ref обычно находится в username (`postgres.<ref>`)
+- Pooler hostname может быть общим и не содержать project ref
 
 **Типовые hostname:**
 
@@ -220,7 +237,7 @@ FROM public.schema_migrations;
 SELECT current_setting('search_path') AS search_path;
 ```
 
-Ожидаемое значение: `"$user", public`
+Запишите результат. Различие `search_path` означает различие ролей/настроек подключения, но не обязательно разные базы. Сравните значения между Railway и Supabase.
 
 ---
 
@@ -256,37 +273,43 @@ SELECT current_setting('search_path') AS search_path;
 
 ## 8. Дерево решений
 
-После заполнения таблицы сравнения определите категорию:
+После заполнения таблицы сравнения определите категорию.
 
-### Доказано: разные базы
+**Важно:** SQL-индикаторы используются как подтверждение состояния, а не как единственный способ доказать физическую идентичность БД.
+
+Разные hostname, порты, IP, `current_user` или direct vs pooler **не являются** доказательством разных БД — они могут вести в одну Supabase database.
+
+Совпадение `schema_migrations` и COUNT **не является** доказательством одной БД — клонированные/восстановленные базы могут иметь одинаковое состояние.
+
+### Подтверждена одна target identity
+
+Если выполняется **все** из:
+
+- Локально сопоставлен одинаковый Supabase project ref (из connection string Railway и Dashboard Supabase)
+- Одинаковый database name/branch
+- Connection strings относятся к direct/pooler одного проекта
+
+**Вывод:** Это одна и та же target database identity.
+
+### Прикладное состояние согласуется
+
+Если выполняется **все** из:
+
+- Совпадают списки filename из `schema_migrations`
+- Совпадают ожидаемые агрегированные COUNT
+- Совпадают контрольные временные метки (`applied_at`)
+
+**Вывод:** Прикладное состояние идентично. Это подтверждает, что базы содержат одни и те же данные и миграции. Для полной уверенности в физической идентичности необходима проверка target identity (выше).
+
+### Вероятно разные target
 
 Если выполняется **любое** из:
 
-- `schema_migrations` существует в одной БД и отсутствует в другой
-- Список filename完全不同 (разные наборы миграций)
-- Один из `users_count > 0`, а другой `= 0` (при одинаковом `schema_migrations`)
+- Разные Supabase project ref (из connection string)
+- Supabase vs Railway PostgreSQL (hostname содержит `railway.internal`)
+- Разные database branch/service identity
 
-**Вывод:** Railway API и Supabase SQL Editor подключены к разным БД. Определите, в какой БД находятся production-данные.
-
-### Вероятно: разные базы
-
-Если выполняется **любое** из:
-
-- `schema_migrations` существует в обеих, но набор filename отличается
-- Разные `current_database()` при совпадающих `schema_migrations`
-- Hostname/порт указывают на разные инстансы
-
-**Вывод:** Скорее всего разные БД. Требуется дополнительная проверка (hostname, project ref в Dashboard).
-
-### Данных недостаточно
-
-Если:
-
-- Результаты частично совпадают, частично отличаются
-- Не удалось выполнить часть запросов
-- Используется pooler и IP/пользователи отличаются, но `schema_migrations` совпадает
-
-**Вывод:** Нужна дополнительная информация. Проверьте project ref в Supabase Dashboard и comparison hostname из connection string.
+**Вывод:** Скорее всего разные target databases. Требуется дополнительная проверка project ref в Supabase Dashboard.
 
 ---
 
@@ -303,7 +326,7 @@ SELECT current_setting('search_path') AS search_path;
 
 - Supabase Dashboard привязан к исходному проекту
 - Миграции Railway применяются к другому проекту
-- Данные пользователей分散ены между двумя проектами
+- Данные пользователей распределены между двумя проектами
 
 **Что нельзя делать до резервного копирования:**
 
@@ -486,12 +509,17 @@ ORDER BY filename;
 
 ## 11. Smoke Checklist после переключения
 
-### Read-only проверки
+### A. Диагностические HTTP-проверки без явной пользовательской мутации
 
 | Проверка | Ожидаемый результат | Статус |
 |----------|---------------------|--------|
 | `GET /health/live` | 200 | |
 | `GET /health/ready` | 200 (DB pool connected) | |
+
+### B. Авторизованные application smoke tests
+
+| Проверка | Ожидаемый результат | Статус |
+|----------|---------------------|--------|
 | `GET /api/me` | 200 + user object | |
 | `GET /api/profile` | 200 + profile or empty | |
 | `GET /api/routes` | 200 + routes list | |
@@ -500,7 +528,9 @@ ORDER BY filename;
 | `GET /api/me/following` | 200 + following list | |
 | `GET /api/users/{user_id}/profile` | 200 + public profile | |
 
-### Write проверки (выполнять отдельно, не в рамках read-only audit)
+> **Внимание:** Несмотря на GET, авторизованные endpoints могут вызвать upsert/sync текущего Telegram user и не являются строго read-only для PostgreSQL.
+
+### C. Явные write smoke tests
 
 | Проверка | Ожидаемый результат | Статус |
 |----------|---------------------|--------|
@@ -511,7 +541,7 @@ ORDER BY filename;
 | `POST /api/users/{user_id}/follow` | 200 + is_following: true | |
 | `DELETE /api/users/{user_id}/follow` | 200 + is_following: false | |
 
-### Общие проверки
+### D. Общие проверки
 
 | Проверка | Ожидаемый результат | Статус |
 |----------|---------------------|--------|
@@ -549,12 +579,6 @@ ORDER BY filename;
 
 ```
 690b5703d4ff26cba33523a198352b035e6d3c0a
-```
-
-### Commit SHA документации
-
-```
-c41d04c66f7437b9bbdd6af0cd4e6159e032b8cf
 ```
 
 ### Compare URL
