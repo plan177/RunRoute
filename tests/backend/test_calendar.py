@@ -1658,3 +1658,105 @@ async def test_get_my_following_success():
         assert resp.status_code == 200
         assert len(resp.json()["users"]) == 1
         assert resp.json()["users"][0]["run_notifications_enabled"] is True
+
+
+# --- Production bugfix: calendar timezone handling ---
+
+
+@pytest.mark.asyncio
+async def test_calendar_runs_with_timezone_offset():
+    """GET /api/calendar/runs with +03:00 timezone should return 200."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.list_planned_runs", new_callable=lambda: AsyncMock(return_value=[])):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/calendar/runs",
+                params={"from": "2026-07-01T00:00:00+03:00", "to": "2026-07-31T23:59:59+03:00"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_calendar_runs_with_utc_z():
+    """GET /api/calendar/runs with Z timezone should return 200."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.list_planned_runs", new_callable=lambda: AsyncMock(return_value=[])):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/calendar/runs",
+                params={"from": "2026-07-01T00:00:00Z", "to": "2026-07-31T23:59:59Z"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_calendar_runs_invalid_date_returns_400():
+    """Invalid date string should return 400, not 500."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/calendar/runs",
+                params={"from": "not-a-date", "to": "2026-07-31T23:59:59Z"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 400
+        assert "Invalid date range" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_calendar_runs_from_after_to_returns_400():
+    """from >= to should return 400."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/calendar/runs",
+                params={"from": "2026-08-01T00:00:00Z", "to": "2026-07-01T00:00:00Z"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_calendar_runs_range_exceeds_366_days():
+    """Range > 366 days should return 400."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/calendar/runs",
+                params={"from": "2025-01-01T00:00:00Z", "to": "2026-12-31T23:59:59Z"},
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+        assert resp.status_code == 400
+        assert "366" in resp.json()["detail"]

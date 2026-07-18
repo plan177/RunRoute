@@ -130,8 +130,8 @@ async def get_me(telegram_user: dict = Depends(get_current_telegram_user)):
         )
         profile = await get_profile_with_counts(user["id"])
         return {"user": user, "profile": profile}
-    except Exception:
-        logger.error("Failed to synchronize current user")
+    except Exception as exc:
+        logger.error("Failed to synchronize current user error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -148,8 +148,8 @@ async def get_profile_endpoint(telegram_user: dict = Depends(get_current_telegra
         )
         profile = await get_profile_with_counts(user["id"])
         return {"user": user, "profile": profile}
-    except Exception:
-        logger.error("Failed to fetch profile")
+    except Exception as exc:
+        logger.error("Failed to fetch profile error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -168,13 +168,12 @@ async def update_profile_endpoint(
             photo_url=telegram_user.get("photo_url"),
         )
         fields = request.model_dump(exclude_unset=True)
-        # Convert social_links to dict if present
-        if "social_links" in fields and fields["social_links"] is not None:
-            fields["social_links"] = fields["social_links"].model_dump()
         profile = await update_profile_fields(user_id=user["id"], fields=fields)
         return {"user": user, "profile": profile}
-    except Exception:
-        logger.error("Failed to update profile")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to update profile error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -204,8 +203,8 @@ async def create_route_endpoint(
             points=points,
         )
         return route
-    except Exception:
-        logger.error("Failed to save route")
+    except Exception as exc:
+        logger.error("Failed to save route error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -224,8 +223,8 @@ async def list_routes_endpoint(
         )
         routes = await list_saved_routes(user_id=user["id"])
         return {"routes": routes}
-    except Exception:
-        logger.error("Failed to list routes")
+    except Exception as exc:
+        logger.error("Failed to list routes error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -250,8 +249,8 @@ async def get_route_endpoint(
         return route
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to get route")
+    except Exception as exc:
+        logger.error("Failed to get route error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -279,8 +278,8 @@ async def rename_route_endpoint(
         return route
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to rename route")
+    except Exception as exc:
+        logger.error("Failed to rename route error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -305,8 +304,8 @@ async def delete_route_endpoint(
         return {"success": True}
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to delete route")
+    except Exception as exc:
+        logger.error("Failed to delete route error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -342,8 +341,8 @@ async def create_run_endpoint(
         return run
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to create planned run")
+    except Exception as exc:
+        logger.error("Failed to create planned run error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -357,8 +356,11 @@ async def list_runs_endpoint(
         from datetime import datetime, timezone
         from dateutil.parser import isoparse
 
-        from_dt = isoparse(from_date)
-        to_dt = isoparse(to_date)
+        try:
+            from_dt = isoparse(from_date)
+            to_dt = isoparse(to_date)
+        except (ValueError, OverflowError):
+            raise HTTPException(status_code=400, detail="Invalid date range")
 
         if from_dt.tzinfo is None:
             from_dt = from_dt.replace(tzinfo=timezone.utc)
@@ -382,8 +384,8 @@ async def list_runs_endpoint(
         return {"runs": runs}
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to list planned runs")
+    except Exception as exc:
+        logger.error("Failed to list planned runs error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -412,8 +414,8 @@ async def update_run_endpoint(
         return run
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to update planned run")
+    except Exception as exc:
+        logger.error("Failed to update planned run error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -438,8 +440,8 @@ async def cancel_run_endpoint(
         return run
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to cancel planned run")
+    except Exception as exc:
+        logger.error("Failed to cancel planned run error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -574,8 +576,8 @@ async def get_user_profile(
         raise
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid user_id")
-    except Exception:
-        logger.error("Failed to fetch user profile")
+    except Exception as exc:
+        logger.error("Failed to fetch user profile error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -613,8 +615,8 @@ async def follow_user_endpoint(
         }
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to follow user")
+    except Exception as exc:
+        logger.error("Failed to follow user error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -641,8 +643,8 @@ async def unfollow_user_endpoint(
         }
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to unfollow user")
+    except Exception as exc:
+        logger.error("Failed to unfollow user error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -667,8 +669,8 @@ async def set_follow_notifications_endpoint(
         return {"run_notifications_enabled": request.enabled}
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to set notifications")
+    except Exception as exc:
+        logger.error("Failed to set notifications error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -700,8 +702,8 @@ async def get_my_followers(
         return {"users": users, "next_cursor": result["next_cursor"]}
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to fetch followers")
+    except Exception as exc:
+        logger.error("Failed to fetch followers error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -734,8 +736,8 @@ async def get_my_following(
         return {"users": users, "next_cursor": result["next_cursor"]}
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to fetch following")
+    except Exception as exc:
+        logger.error("Failed to fetch following error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

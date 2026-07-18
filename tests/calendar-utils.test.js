@@ -14,7 +14,7 @@ const {
     getMonthStart, getMonthEnd, formatDatetimeLocal, datetimeLocalToISO,
     isSameDay, getRunDayKey, buildCreateRunPayload, buildUpdateRunPayload,
     buildUpdateRunUrl, buildSaveRoutePayload, validatePointsCount,
-    buildCurrentRouteFromApi,
+    buildCurrentRouteFromApi, buildCalendarRunsUrl, fetchCalendarData,
 } = ctx.RunRouteCalendarUtils || ctx.module.exports;
 
 // Also read production files for regression checks
@@ -626,5 +626,255 @@ describe('saved route viewing production code regression', () => {
         const body = fn.substring(0, endIdx > 0 ? endIdx : 2000);
         assert.ok(!body.includes('/* silent */'),
             'delete must not silently swallow errors');
+    });
+});
+
+
+// --- Production bugfix: calendar URL encoding ---
+
+describe('buildCalendarRunsUrl', () => {
+    it('encodes + in timezone offset as %2B', () => {
+        const url = buildCalendarRunsUrl(
+            '2026-07-01T00:00:00+03:00',
+            '2026-07-31T23:59:59+03:00'
+        );
+        assert.ok(url.includes('%2B03%3A00'),
+            'URL must encode + as %2B: ' + url);
+    });
+
+    it('round-trips +03:00 correctly', () => {
+        const from = '2026-07-01T00:00:00+03:00';
+        const to = '2026-07-31T23:59:59+03:00';
+        const url = buildCalendarRunsUrl(from, to);
+        const params = new URLSearchParams(url.split('?')[1]);
+        assert.equal(params.get('from'), from);
+        assert.equal(params.get('to'), to);
+    });
+
+    it('preserves UTC Z timezone', () => {
+        const url = buildCalendarRunsUrl(
+            '2026-07-01T00:00:00Z',
+            '2026-07-31T23:59:59Z'
+        );
+        assert.ok(url.includes('from=2026-07-01'), 'must contain from param');
+        assert.ok(url.includes('to=2026-07-31'), 'must contain to param');
+    });
+});
+
+describe('calendar partial availability', () => {
+    it('app.js loads runs and routes via Promise.allSettled', () => {
+        assert.ok(appJs.includes('Promise.allSettled'),
+            'loadCalendarData must use Promise.allSettled');
+    });
+
+    it('loadCalendarData delegates to fetchCalendarData', () => {
+        const fnStart = appJs.indexOf('async function loadCalendarData');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('fetchCalendarData'),
+            'must call fetchCalendarData');
+    });
+
+    it('routes use dedupRoutesById', () => {
+        const fnStart = appJs.indexOf('async function loadCalendarData');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('dedupRoutesById'),
+            'must deduplicate routes');
+    });
+
+    it('app.js uses buildCalendarRunsUrl', () => {
+        assert.ok(appJs.includes('buildCalendarRunsUrl'),
+            'app.js must use buildCalendarRunsUrl');
+    });
+
+    it('app.js destructures buildCalendarRunsUrl', () => {
+        assert.ok(appJs.includes('buildCalendarRunsUrl') &&
+                  appJs.includes('RunRouteCalendarUtils'),
+            'must import buildCalendarRunsUrl');
+    });
+});
+
+
+// --- Behavioral tests for fetchCalendarData ---
+
+function makeResponse(ok, status, body) {
+    return {
+        ok,
+        status,
+        json: async () => body,
+    };
+}
+
+function makeNetworkError() {
+    return new Error('Failed to fetch');
+}
+
+describe('fetchCalendarData — runs=500, routes=200', () => {
+    it('routes saved, runsError present, routesError absent', async () => {
+        const runsResp = makeResponse(false, 500, null);
+        const routesResp = makeResponse(true, 200, { routes: [{ id: 'r1', name: 'Route 1' }] });
+        const result = await fetchCalendarData(runsResp, routesResp, null);
+        assert.equal(result.runs.length, 0);
+        assert.equal(result.runsError, 'server');
+        assert.equal(result.routesError, null);
+        assert.equal(result.routes.length, 1);
+        assert.equal(result.routes[0].id, 'r1');
+    });
+});
+
+describe('fetchCalendarData — runs=200, routes=500', () => {
+    it('runs saved, routesError present', async () => {
+        const runsResp = makeResponse(true, 200, { runs: [{ id: 'run1', title: 'Morning' }] });
+        const routesResp = makeResponse(false, 500, null);
+        const result = await fetchCalendarData(runsResp, routesResp, null);
+        assert.equal(result.runsError, null);
+        assert.equal(result.routesError, 'server');
+        assert.equal(result.runs.length, 1);
+        assert.equal(result.runs[0].id, 'run1');
+        assert.equal(result.routes.length, 0);
+    });
+});
+
+describe('fetchCalendarData — both 200', () => {
+    it('both saved, routes deduplicated', async () => {
+        const runsResp = makeResponse(true, 200, { runs: [{ id: 'run1' }] });
+        const routesResp = makeResponse(true, 200, { routes: [{ id: 'r1' }, { id: 'r1' }, { id: 'r2' }] });
+        const result = await fetchCalendarData(runsResp, routesResp, dedupRoutesById);
+        assert.equal(result.runsError, null);
+        assert.equal(result.routesError, null);
+        assert.equal(result.runs.length, 1);
+        assert.equal(result.routes.length, 2);
+    });
+});
+
+describe('fetchCalendarData — network error runs only', () => {
+    it('successful routes not lost', async () => {
+        const runsErr = makeNetworkError();
+        const routesResp = makeResponse(true, 200, { routes: [{ id: 'r1' }] });
+        const result = await fetchCalendarData(runsErr, routesResp, null);
+        assert.equal(result.runsError, 'network');
+        assert.equal(result.routesError, null);
+        assert.equal(result.runs.length, 0);
+        assert.equal(result.routes.length, 1);
+    });
+});
+
+describe('fetchCalendarData — network error routes only', () => {
+    it('successful runs not lost', async () => {
+        const runsResp = makeResponse(true, 200, { runs: [{ id: 'run1' }] });
+        const routesErr = makeNetworkError();
+        const result = await fetchCalendarData(runsResp, routesErr, null);
+        assert.equal(result.runsError, null);
+        assert.equal(result.routesError, 'network');
+        assert.equal(result.runs.length, 1);
+        assert.equal(result.routes.length, 0);
+    });
+});
+
+describe('fetchCalendarData — both fail', () => {
+    it('returns both errors', async () => {
+        const runsResp = makeResponse(false, 500, null);
+        const routesResp = makeResponse(false, 500, null);
+        const result = await fetchCalendarData(runsResp, routesResp, null);
+        assert.equal(result.runsError, 'server');
+        assert.equal(result.routesError, 'server');
+        assert.equal(result.runs.length, 0);
+        assert.equal(result.routes.length, 0);
+    });
+
+    it('mixed errors: network + auth', async () => {
+        const runsErr = makeNetworkError();
+        const routesResp = makeResponse(false, 401, null);
+        const result = await fetchCalendarData(runsErr, routesResp, null);
+        assert.equal(result.runsError, 'network');
+        assert.equal(result.routesError, 'auth');
+    });
+});
+
+describe('fetchCalendarData — 404 not_found', () => {
+    it('returns not_found error', async () => {
+        const runsResp = makeResponse(false, 404, null);
+        const routesResp = makeResponse(true, 200, { routes: [] });
+        const result = await fetchCalendarData(runsResp, routesResp, null);
+        assert.equal(result.runsError, 'not_found');
+        assert.equal(result.routesError, null);
+    });
+});
+
+describe('fetchCalendarData — auth 401', () => {
+    it('returns auth error', async () => {
+        const runsResp = makeResponse(false, 401, null);
+        const routesResp = makeResponse(false, 401, null);
+        const result = await fetchCalendarData(runsResp, routesResp, null);
+        assert.equal(result.runsError, 'auth');
+        assert.equal(result.routesError, 'auth');
+    });
+});
+
+describe('fetchCalendarData — bad json', () => {
+    it('returns unknown error on json parse failure', async () => {
+        const badResp = {
+            ok: true,
+            status: 200,
+            json: async () => { throw new Error('bad json'); },
+        };
+        const routesResp = makeResponse(true, 200, { routes: [] });
+        const result = await fetchCalendarData(badResp, routesResp, null);
+        assert.equal(result.runsError, 'unknown');
+        assert.equal(result.routesError, null);
+    });
+});
+
+describe('loadCalendarData integration', () => {
+    it('app.js uses Promise.allSettled', () => {
+        assert.ok(appJs.includes('Promise.allSettled'),
+            'loadCalendarData must use Promise.allSettled');
+    });
+
+    it('loadCalendarData returns { runsError, routesError }', () => {
+        const fnStart = appJs.indexOf('async function loadCalendarData');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('runsError') && fnBody.includes('routesError'),
+            'must return runsError and routesError');
+    });
+
+    it('loadCalendarData calls fetchCalendarData', () => {
+        const fnStart = appJs.indexOf('async function loadCalendarData');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('fetchCalendarData'),
+            'must call fetchCalendarData');
+    });
+
+    it('loadCalendarData uses dedupRoutesById', () => {
+        const fnStart = appJs.indexOf('async function loadCalendarData');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('dedupRoutesById'),
+            'must pass dedupRoutesById');
+    });
+
+    it('openCalendar shows content on partial success', () => {
+        const fnStart = appJs.indexOf('async function openCalendar');
+        const fnBody = appJs.substring(fnStart, fnStart + 2500);
+        assert.ok(fnBody.includes('cal-runs-status'),
+            'must use cal-runs-status element');
+    });
+
+    it('openCalendar shows runs error separately', () => {
+        const fnStart = appJs.indexOf('async function openCalendar');
+        const fnBody = appJs.substring(fnStart, fnStart + 2500);
+        assert.ok(fnBody.includes('runsError') && fnBody.includes('routesError'),
+            'must handle both error types');
+    });
+
+    it('openCalendar does not hide content when one resource succeeds', () => {
+        const fnStart = appJs.indexOf('async function openCalendar');
+        const fnBody = appJs.substring(fnStart, fnStart + 2500);
+        const partialIdx = fnBody.indexOf('At least one succeeded');
+        assert.ok(partialIdx > 0,
+            'must show content on partial success');
+    });
+
+    it('index.html has cal-runs-status element', () => {
+        assert.ok(indexHtml.includes('id="cal-runs-status"'),
+            'index.html must contain cal-runs-status');
     });
 });

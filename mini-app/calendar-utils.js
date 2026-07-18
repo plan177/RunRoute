@@ -141,6 +141,60 @@
         };
     }
 
+    function buildCalendarRunsUrl(from, to) {
+        return '/api/calendar/runs?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to);
+    }
+
+    /**
+     * Process two raw fetch results (responses or errors) for calendar data.
+     * Returns { runs, routes, runsError, routesError }.
+     * Each error is one of: null, 'auth', 'not_found', 'server', 'network', 'unknown'.
+     * Both resources are processed independently — one failing does not affect the other.
+     */
+    async function fetchCalendarData(runsResult, routesResult, dedupFn) {
+        let runs = [];
+        let runsError = null;
+        let routes = [];
+        let routesError = null;
+
+        // Process runs
+        if (!runsResult || !('ok' in runsResult)) {
+            runsError = 'network';
+        } else if (runsResult.ok) {
+            try {
+                const data = await runsResult.json();
+                runs = data.runs || [];
+            } catch {
+                runsError = 'unknown';
+            }
+        } else {
+            runs = [];
+            if (runsResult.status === 401) runsError = 'auth';
+            else if (runsResult.status === 404) runsError = 'not_found';
+            else if (runsResult.status >= 500) runsError = 'server';
+            else runsError = 'unknown';
+        }
+
+        // Process routes
+        if (!routesResult || !('ok' in routesResult)) {
+            routesError = 'network';
+        } else if (routesResult.ok) {
+            try {
+                const data = await routesResult.json();
+                routes = dedupFn ? dedupFn(data.routes || []) : (data.routes || []);
+            } catch {
+                routesError = 'unknown';
+            }
+        } else {
+            if (routesResult.status === 401) routesError = 'auth';
+            else if (routesResult.status === 404) routesError = 'not_found';
+            else if (routesResult.status >= 500) routesError = 'server';
+            else routesError = 'unknown';
+        }
+
+        return { runs, routes, runsError, routesError };
+    }
+
     return {
         getMonthStart,
         getMonthEnd,
@@ -160,6 +214,8 @@
         buildRouteDetailUrl,
         buildRouteUpdateUrl,
         buildRouteDeleteUrl,
-        buildCurrentRouteFromApi
+        buildCurrentRouteFromApi,
+        buildCalendarRunsUrl,
+        fetchCalendarData
     };
 });
