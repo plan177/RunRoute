@@ -168,13 +168,15 @@ WHERE schemaname = 'public'
 ORDER BY tablename;
 ```
 
-Ожидаемый набор таблиц (миграции 001–005):
+Ожидаемый набор таблиц (миграции 001–006):
 
 ```
 follows
 planned_runs
 profiles
 reminder_deliveries
+run_lobby_participants
+run_lobbies
 saved_routes
 schema_migrations
 users
@@ -189,7 +191,9 @@ UNION ALL SELECT 'profiles',       to_regclass('public.profiles') IS NOT NULL
 UNION ALL SELECT 'saved_routes',   to_regclass('public.saved_routes') IS NOT NULL
 UNION ALL SELECT 'planned_runs',   to_regclass('public.planned_runs') IS NOT NULL
 UNION ALL SELECT 'follows',        to_regclass('public.follows') IS NOT NULL
-UNION ALL SELECT 'reminder_deliveries', to_regclass('public.reminder_deliveries') IS NOT NULL;
+UNION ALL SELECT 'reminder_deliveries', to_regclass('public.reminder_deliveries') IS NOT NULL
+UNION ALL SELECT 'run_lobbies',    to_regclass('public.run_lobbies') IS NOT NULL
+UNION ALL SELECT 'run_lobby_participants', to_regclass('public.run_lobby_participants') IS NOT NULL;
 ```
 
 ### 5.5. Список применённых миграций
@@ -200,7 +204,7 @@ FROM public.schema_migrations
 ORDER BY filename;
 ```
 
-Ожидаемый результат (5 миграций):
+Ожидаемый результат (6 миграций):
 
 ```
 001_users_profiles.sql
@@ -208,6 +212,7 @@ ORDER BY filename;
 003_saved_routes_and_planned_runs.sql
 004_planned_run_reminders.sql
 005_public_profiles_and_follows.sql
+006_run_lobbies.sql
 ```
 
 > **Список filename из `schema_migrations` — основной прикладной индикатор.** Совпадение `current_database` / `current_user` / IP недостаточно.
@@ -221,7 +226,9 @@ SELECT
   (SELECT count(*) FROM public.profiles)     AS profiles_count,
   (SELECT count(*) FROM public.saved_routes) AS routes_count,
   (SELECT count(*) FROM public.planned_runs) AS runs_count,
-  (SELECT count(*) FROM public.follows)      AS follows_count;
+  (SELECT count(*) FROM public.follows)      AS follows_count,
+  (SELECT count(*) FROM public.run_lobbies)  AS lobbies_count,
+  (SELECT count(*) FROM public.run_lobby_participants) AS lobby_participants_count;
 ```
 
 ### 5.7. Последняя дата миграции
@@ -475,7 +482,7 @@ FROM public.schema_migrations
 ORDER BY filename;
 ```
 
-Убедиться, что все 5 миграций (001–005) присутствуют.
+Убедиться, что все 6 миграций (001–006) присутствуют.
 
 ### Шаг 6. Спланировать перенос данных
 
@@ -546,7 +553,7 @@ ORDER BY filename;
 | Проверка | Ожидаемый результат | Статус |
 |----------|---------------------|--------|
 | Отсутствие 500 ошибок | No Internal Server Error | |
-| Миграции 001–005 | `schema_migrations` содержит 5 записей | |
+| Миграции 001–006 | `schema_migrations` содержит 6 записей | |
 | Существующие данные пользователя | users_count, profiles_count совпадают с шагом 2 | |
 
 ---
@@ -571,7 +578,7 @@ ORDER BY filename;
 
 - Railway variables (DATABASE_URL, SUPABASE_URL, BOT_TOKEN, SECRET_KEY)
 - Supabase project settings
-- Миграции (001–005) — не добавлять, не удалять, не изменять
+- Миграции (001–006) — не добавлять, не удалять, не изменять
 - `.env` файлы — не коммитить
 - Production URL приложения
 

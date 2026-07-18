@@ -818,3 +818,112 @@ async def test_update_lobby_only_max_changes():
                         json={"pace_max_sec_per_km": 500}, headers={"X-Telegram-Init-Data": init_data})
         assert mu.call_args[1]["fields"]["pace_max_sec_per_km"] == 500
         assert "pace_min_sec_per_km" not in mu.call_args[1]["fields"]
+
+
+@pytest.mark.asyncio
+async def test_update_lobby_other_user_open():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_other_user())), \
+         patch("backend.main.update_lobby", new_callable=lambda: AsyncMock(return_value={"error": "forbidden"})):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            assert (await c.put("/api/lobbies/11111111-1111-1111-1111-111111111111",
+                                json={"title": "X"}, headers={"X-Telegram-Init-Data": init_data})).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_cancel_lobby_other_user_open():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_other_user())), \
+         patch("backend.main.cancel_lobby", new_callable=lambda: AsyncMock(return_value={"error": "forbidden"})):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            assert (await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/cancel",
+                                 headers={"X-Telegram-Init-Data": init_data})).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_lobby_organizer_missing_404():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.get_lobby", new_callable=lambda: AsyncMock(return_value=None)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            assert (await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
+                                headers={"X-Telegram-Init-Data": init_data})).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_no_from_uses_utc_now():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.list_lobbies", new_callable=lambda: AsyncMock(return_value={
+             "items": [], "next_cursor": None,
+         })) as mock_list:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/lobbies", headers={"X-Telegram-Init-Data": init_data})
+        assert resp.status_code == 200
+        call_kwargs = mock_list.call_args[1]
+        # from_dt is None at the endpoint level; list_lobbies defaults to now() internally
+        assert call_kwargs["from_dt"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_with_explicit_from():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.list_lobbies", new_callable=lambda: AsyncMock(return_value={
+             "items": [], "next_cursor": None,
+         })) as mock_list:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            await c.get("/api/lobbies?from=2027-06-01T00:00:00Z", headers={"X-Telegram-Init-Data": init_data})
+        call_kwargs = mock_list.call_args[1]
+        assert call_kwargs["from_dt"] is not None
+
+
+@pytest.mark.asyncio
+async def test_update_lobby_invalid_pace_pair_returns_422():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.update_lobby", new_callable=lambda: AsyncMock(
+             return_value={"error": "invalid_pace_pair"})):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.put("/api/lobbies/11111111-1111-1111-1111-111111111111",
+                               json={"pace_min_sec_per_km": 600, "pace_max_sec_per_km": 300},
+                               headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 422
+
+
+def test_cursor_pagination_stable():
+    from backend.lobbies import _encode_cursor, _decode_cursor
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    ts1 = datetime(2027, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+    id1 = uuid4()
+    cursor1 = _encode_cursor(ts1, str(id1))
+
+    ts2 = datetime(2027, 6, 15, 12, 0, 1, tzinfo=timezone.utc)
+    id2 = uuid4()
+    cursor2 = _encode_cursor(ts2, str(id2))
+
+    d1_ts, d1_id = _decode_cursor(cursor1)
+    d2_ts, d2_id = _decode_cursor(cursor2)
+
+    assert (ts1, str(id1)) < (ts2, str(id2))
+    assert (d1_ts, d1_id) < (d2_ts, d2_id)
