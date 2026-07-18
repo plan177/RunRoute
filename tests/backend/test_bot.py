@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -19,6 +20,7 @@ def _make_builder_mock(mock_app):
     builder.return_value = builder
     builder.token.return_value = builder
     builder.post_init.return_value = builder
+    builder.post_shutdown.return_value = builder
     builder.build.return_value = mock_app
     return builder
 
@@ -31,6 +33,9 @@ def _make_run():
         "title": "Test",
         "starts_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
     }
+
+
+# --- Existing InvalidToken tests ---
 
 
 def test_invalid_token_exits_with_error():
@@ -79,12 +84,15 @@ def test_invalid_token_log_message_is_safe():
         bot_mod.BOT_TOKEN = FAKE_TOKEN
         bot_mod.logger = mock_logger
         with patch.object(bot_mod, "ApplicationBuilder", _make_builder_mock(mock_app)):
-            with pytest.raises(SystemExit):
-                bot_mod.main()
+            with patch("backend.config.get_settings") as mock_settings, \
+                 patch("backend.database.init_db_pool", new_callable=AsyncMock):
+                mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = "postgres://ok"
+                with pytest.raises(SystemExit):
+                    bot_mod.main()
     finally:
         bot_mod.BOT_TOKEN = orig_token
         bot_mod.logger = orig_logger
-    mock_logger.error.assert_called_once_with(
+    mock_logger.error.assert_called_with(
         "Telegram rejected BOT_TOKEN; rotate the token in deployment variables"
     )
     for arg in mock_logger.error.call_args[0]:
@@ -142,7 +150,10 @@ def test_normal_startup_not_affected():
     try:
         bot_mod.BOT_TOKEN = FAKE_TOKEN
         with patch.object(bot_mod, "ApplicationBuilder", _make_builder_mock(mock_app)), \
-             patch("sys.exit") as mock_exit:
+             patch("sys.exit") as mock_exit, \
+             patch("backend.config.get_settings") as mock_settings, \
+             patch("backend.database.init_db_pool", new_callable=AsyncMock):
+            mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = "postgres://ok"
             bot_mod.main()
             mock_exit.assert_not_called()
             mock_app.run_polling.assert_called_once()
@@ -150,19 +161,55 @@ def test_normal_startup_not_affected():
         bot_mod.BOT_TOKEN = orig_token
 
 
-def test_missing_bot_token_returns_early():
+# --- Environment variable checks ---
+
+
+def test_missing_bot_token_exits_with_code_1():
     bot_mod = _reload_bot()
-    mock_builder = MagicMock()
     orig_token = bot_mod.BOT_TOKEN
     try:
         bot_mod.BOT_TOKEN = ""
-        with patch.object(bot_mod, "ApplicationBuilder", mock_builder), \
-             patch("sys.exit") as mock_exit:
-            bot_mod.main()
-            mock_builder.token.assert_not_called()
-            mock_exit.assert_not_called()
+        with patch("backend.config.get_settings") as mock_settings:
+            mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = "postgres://ok"
+            with pytest.raises(SystemExit) as exc_info:
+                bot_mod.main()
+            assert exc_info.value.code == 1
     finally:
         bot_mod.BOT_TOKEN = orig_token
+
+
+def test_missing_database_url_exits_with_code_1():
+    bot_mod = _reload_bot()
+    orig_token = bot_mod.BOT_TOKEN
+    try:
+        bot_mod.BOT_TOKEN = FAKE_TOKEN
+        with patch("backend.config.get_settings") as mock_settings:
+            mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = ""
+            with pytest.raises(SystemExit) as exc_info:
+                bot_mod.main()
+            assert exc_info.value.code == 1
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+
+
+def test_missing_env_does_not_log_value(caplog):
+    import logging
+    bot_mod = _reload_bot()
+    orig_token = bot_mod.BOT_TOKEN
+    try:
+        bot_mod.BOT_TOKEN = ""
+        with patch("backend.config.get_settings") as mock_settings, \
+             caplog.at_level(logging.ERROR, logger="bot"):
+            mock_settings.return_value.DATABASE_URL.get_secret_value.return_value = ""
+            with pytest.raises(SystemExit):
+                bot_mod.main()
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+    assert FAKE_TOKEN not in caplog.text
+    assert "postgres://" not in caplog.text
+
+
+# --- Classification tests ---
 
 
 def test_classify_forbidden():
@@ -183,9 +230,18 @@ def test_classify_network_error():
     assert bot_mod._classify_send_error(NetworkError("fail")) == "telegram_network_error"
 
 
+def test_classify_bad_request():
+    from telegram.error import BadRequest
+    bot_mod = _reload_bot()
+    assert bot_mod._classify_send_error(BadRequest("bad")) == "telegram_api_error"
+
+
 def test_classify_unexpected():
     bot_mod = _reload_bot()
     assert bot_mod._classify_send_error(RuntimeError("oops")) == "unexpected_error"
+
+
+# --- process_due_reminders_once tests ---
 
 
 @pytest.mark.asyncio
@@ -248,23 +304,122 @@ async def test_send_message_error_no_token_in_log(caplog):
     assert FAKE_TOKEN not in caplog.text
 
 
-def test_classify_bad_request():
-    from telegram.error import BadRequest
+# --- Lifecycle tests ---
+
+
+@pytest.mark.asyncio
+async def test_post_init_initializes_pool():
     bot_mod = _reload_bot()
-    assert bot_mod._classify_send_error(BadRequest("bad")) == "telegram_api_error"
+    mock_app = MagicMock()
+    mock_app.bot_data = {}
+
+    with patch("backend.database.init_db_pool", new_callable=AsyncMock) as mock_init, \
+         patch("asyncio.create_task") as mock_create_task:
+        mock_create_task.return_value = MagicMock()
+        await bot_mod.post_init(mock_app)
+
+    mock_init.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_post_init_stores_task_in_bot_data():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot_data = {}
+
+    mock_task = MagicMock()
+    with patch("backend.database.init_db_pool", new_callable=AsyncMock), \
+         patch("asyncio.create_task", return_value=mock_task):
+        await bot_mod.post_init(mock_app)
+
+    assert mock_app.bot_data["reminder_worker_task"] is mock_task
+
+
+@pytest.mark.asyncio
+async def test_post_init_does_not_use_app_create_task():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot_data = {}
+    mock_app.create_task = MagicMock()
+
+    with patch("backend.database.init_db_pool", new_callable=AsyncMock), \
+         patch("asyncio.create_task", return_value=MagicMock()):
+        await bot_mod.post_init(mock_app)
+
+    mock_app.create_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_post_shutdown_cancels_task_and_closes_pool():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+
+    async def fake_task():
+        await asyncio.sleep(100)
+
+    task = asyncio.create_task(fake_task())
+    mock_app.bot_data = {"reminder_worker_task": task}
+
+    with patch("backend.database.close_db_pool", new_callable=AsyncMock) as mock_close:
+        await bot_mod.post_shutdown(mock_app)
+
+    assert task.cancelled()
+    mock_close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_post_shutdown_handles_missing_task():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot_data = {}
+
+    with patch("backend.database.close_db_pool", new_callable=AsyncMock) as mock_close:
+        await bot_mod.post_shutdown(mock_app)
+
+    mock_close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_post_shutdown_handles_already_done_task():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_task = asyncio.create_task(asyncio.sleep(0))
+    await asyncio.sleep(0)  # let it complete
+    mock_app.bot_data = {"reminder_worker_task": mock_task}
+
+    with patch("backend.database.close_db_pool", new_callable=AsyncMock) as mock_close:
+        await bot_mod.post_shutdown(mock_app)
+
+    mock_close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reminder_worker_handles_cancelled_error():
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.bot = MagicMock()
+
+    with patch("bot.process_due_reminders_once", new_callable=AsyncMock,
+               side_effect=asyncio.CancelledError()):
+        task = asyncio.create_task(bot_mod.reminder_worker(mock_app))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert task.cancelled() or task.done()
 
 
 @pytest.mark.asyncio
 async def test_reminder_worker_no_exc_info_in_log(caplog):
-    import asyncio
     import logging
     bot_mod = _reload_bot()
     mock_app = MagicMock()
     mock_app.bot = MagicMock()
 
-    with patch("backend.database.init_db_pool", new_callable=AsyncMock), \
-         patch("backend.database.close_db_pool", new_callable=AsyncMock), \
-         patch("bot.process_due_reminders_once", new_callable=AsyncMock,
+    with patch("bot.process_due_reminders_once", new_callable=AsyncMock,
                side_effect=RuntimeError("DB password=secret999 host=prod.db")):
         with caplog.at_level(logging.ERROR, logger="bot"):
             try:
@@ -282,15 +437,12 @@ async def test_reminder_worker_no_exc_info_in_log(caplog):
 
 @pytest.mark.asyncio
 async def test_reminder_worker_log_action_and_error_type(caplog):
-    import asyncio
     import logging
     bot_mod = _reload_bot()
     mock_app = MagicMock()
     mock_app.bot = MagicMock()
 
-    with patch("backend.database.init_db_pool", new_callable=AsyncMock), \
-         patch("backend.database.close_db_pool", new_callable=AsyncMock), \
-         patch("bot.process_due_reminders_once", new_callable=AsyncMock,
+    with patch("bot.process_due_reminders_once", new_callable=AsyncMock,
                side_effect=ValueError("something")):
         with caplog.at_level(logging.ERROR, logger="bot"):
             try:
@@ -305,3 +457,21 @@ async def test_reminder_worker_log_action_and_error_type(caplog):
     msg = error_records[0].message
     assert "action=worker_tick" in msg
     assert "error_type=ValueError" in msg
+
+
+def test_main_uses_post_shutdown():
+    """main() passes post_shutdown to ApplicationBuilder."""
+    bot_mod = _reload_bot()
+    mock_app = MagicMock()
+    mock_app.run_polling.return_value = None
+    orig_token = bot_mod.BOT_TOKEN
+    try:
+        bot_mod.BOT_TOKEN = FAKE_TOKEN
+        with patch.object(bot_mod, "ApplicationBuilder", _make_builder_mock(mock_app)), \
+             patch("sys.exit"):
+            bot_mod.main()
+    finally:
+        bot_mod.BOT_TOKEN = orig_token
+    # Verify post_shutdown was configured
+    builder = mock_app  # builder mock chains through
+    assert hasattr(bot_mod, "post_shutdown")

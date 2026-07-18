@@ -32,8 +32,7 @@ SAFE_ERROR_CODES = frozenset({
 def _classify_send_error(exc: Exception) -> str:
     """Classify a send_message exception into a safe error code.
 
-    Never uses str(), repr(), or traceback -- only isinstance checks
-    and exception class names.
+    Never uses str(), repr(), or traceback -- only isinstance checks.
     """
     from telegram.error import Forbidden, TimedOut, NetworkError, TelegramError, BadRequest
 
@@ -50,6 +49,16 @@ def _classify_send_error(exc: Exception) -> str:
     return "unexpected_error"
 
 
+def _check_env_vars():
+    """Check required environment variables before starting. Returns list of missing names."""
+    missing = []
+    if not BOT_TOKEN:
+        missing.append("BOT_TOKEN")
+    from backend.config import get_settings
+    settings = get_settings()
+    if not settings.DATABASE_URL.get_secret_value():
+        missing.append("DATABASE_URL")
+    return missing
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -178,41 +187,58 @@ async def reminder_worker(app):
 
     Runs alongside Telegram polling in the same process.
     """
-    from backend.database import init_db_pool, close_db_pool
-
-    await init_db_pool()
     logger.info("Reminder worker started")
-
     try:
         while True:
             try:
                 await process_due_reminders_once(app.bot)
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
-                logger.error("Reminder worker iteration failed action=worker_tick error_type=%s", type(exc).__name__)
+                logger.error("Reminder worker iteration failed action=worker_tick error_type=%s",
+                             type(exc).__name__)
 
             await asyncio.sleep(WORKER_INTERVAL_SECONDS)
+    except asyncio.CancelledError:
+        pass
     finally:
-        await close_db_pool()
         logger.info("Reminder worker stopped")
 
 
 async def post_init(app):
     """Called after Application initialization. Starts the reminder worker."""
-    app.create_task(reminder_worker(app))
+    from backend.database import init_db_pool
+    await init_db_pool()
+    task = asyncio.create_task(reminder_worker(app))
+    app.bot_data["reminder_worker_task"] = task
+
+
+async def post_shutdown(app):
+    """Called during shutdown. Cancels worker and closes DB pool."""
+    task = app.bot_data.get("reminder_worker_task")
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    from backend.database import close_db_pool
+    await close_db_pool()
 
 
 def main():
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN not set! Bot will not start.")
-        return
+    missing = _check_env_vars()
+    if missing:
+        logger.error("Missing required env vars: %s — bot will not start.", ", ".join(missing))
+        sys.exit(1)
 
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).post_shutdown(post_shutdown).build()
 
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('help', help_command))
     app.add_error_handler(error_handler)
 
-    logger.info(f"Bot started. Web App URL: {WEB_APP_URL}")
+    logger.info("Bot started. Web App URL: %s", WEB_APP_URL)
     try:
         app.run_polling()
     except InvalidToken:
