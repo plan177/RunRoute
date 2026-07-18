@@ -1,6 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import Optional
 from uuid import UUID
 from fastapi import FastAPI, HTTPException, Request, Query, Depends, Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +21,11 @@ from .calendar import (
     create_planned_run, list_planned_runs, get_planned_run,
     update_planned_run, cancel_planned_run,
 )
+from .lobbies import (
+    create_lobby, get_lobby, get_organizer_info, list_lobbies,
+    update_lobby, cancel_lobby, _decode_cursor,
+)
+from .models import RunLobbyCreate, RunLobbyUpdate
 from .follows import (
     follow_user, unfollow_user, is_following,
     get_followers, get_following, get_follow_counts,
@@ -448,6 +454,215 @@ async def cancel_run_endpoint(
 @app.get("/")
 async def root():
     return {"message": "RunRouteBot API is running", "version": "1.0.0"}
+
+
+@app.post("/api/lobbies")
+async def create_lobby_endpoint(
+    request: RunLobbyCreate,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        lobby = await create_lobby(
+            organizer_id=user["id"],
+            title=request.title,
+            run_type=request.run_type,
+            starts_at=request.starts_at,
+            city=request.city,
+            meeting_lat=request.meeting_lat,
+            meeting_lng=request.meeting_lng,
+            area_label=request.area_label,
+            saved_route_id=request.saved_route_id,
+            distance_m=request.distance_m,
+            pace_min_sec_per_km=request.pace_min_sec_per_km,
+            pace_max_sec_per_km=request.pace_max_sec_per_km,
+            duration_minutes=request.duration_minutes,
+            capacity=request.capacity,
+            description=request.description,
+        )
+        if isinstance(lobby, dict) and lobby.get("error") == "private_profile":
+            raise HTTPException(status_code=400, detail="Profile must be public to create a lobby")
+        if isinstance(lobby, dict) and lobby.get("error") == "route_not_found":
+            raise HTTPException(status_code=404, detail="Saved route not found")
+        return lobby
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to create lobby error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/lobbies")
+async def list_lobbies_endpoint(
+    city: Optional[str] = Query(None),
+    run_type: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None, alias="from"),
+    to_date: Optional[str] = Query(None, alias="to"),
+    limit: int = Query(20, ge=1, le=100),
+    cursor: Optional[str] = Query(None),
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        from datetime import timezone as tz
+        from dateutil.parser import isoparse
+
+        from_dt = None
+        to_dt = None
+        if from_date:
+            try:
+                from_dt = isoparse(from_date)
+            except (ValueError, OverflowError):
+                raise HTTPException(status_code=400, detail="Invalid 'from' date")
+            if from_dt.tzinfo is None:
+                from_dt = from_dt.replace(tzinfo=tz.utc)
+        if to_date:
+            try:
+                to_dt = isoparse(to_date)
+            except (ValueError, OverflowError):
+                raise HTTPException(status_code=400, detail="Invalid 'to' date")
+            if to_dt.tzinfo is None:
+                to_dt = to_dt.replace(tzinfo=tz.utc)
+
+        if cursor:
+            try:
+                _decode_cursor(cursor)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid cursor")
+
+        result = await list_lobbies(
+            city=city,
+            run_type=run_type,
+            from_dt=from_dt,
+            to_dt=to_dt,
+            limit=limit,
+            cursor=cursor,
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to list lobbies error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/lobbies/{lobby_id}")
+async def get_lobby_endpoint(
+    lobby_id: UUID,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        lobby = await get_lobby(lobby_id)
+        if lobby is None:
+            raise HTTPException(status_code=404, detail="Lobby not found")
+
+        organizer = await get_organizer_info(lobby["organizer_id"])
+
+        # Build safe response — no Telegram/PII fields from users
+        return {
+            "id": lobby["id"],
+            "title": lobby["title"],
+            "run_type": lobby["run_type"],
+            "starts_at": lobby["starts_at"],
+            "city": lobby["city"],
+            "area_label": lobby["area_label"],
+            "meeting_lat": lobby["meeting_lat"],
+            "meeting_lng": lobby["meeting_lng"],
+            "distance_m": lobby["distance_m"],
+            "pace_min_sec_per_km": lobby["pace_min_sec_per_km"],
+            "pace_max_sec_per_km": lobby["pace_max_sec_per_km"],
+            "duration_minutes": lobby["duration_minutes"],
+            "capacity": lobby["capacity"],
+            "description": lobby["description"],
+            "status": lobby["status"],
+            "saved_route_id": lobby["saved_route_id"],
+            "route_name": lobby.get("route_name"),
+            "participant_count": lobby.get("participant_count"),
+            "organizer": organizer,
+            "created_at": lobby["created_at"],
+            "updated_at": lobby["updated_at"],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to get lobby error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.put("/api/lobbies/{lobby_id}")
+async def update_lobby_endpoint(
+    lobby_id: UUID,
+    request: RunLobbyUpdate,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        fields = request.model_dump(exclude_unset=True)
+        # status and organizer_id cannot be changed via update
+        fields.pop("status", None)
+        fields.pop("organizer_id", None)
+
+        result = await update_lobby(
+            lobby_id=lobby_id,
+            organizer_id=user["id"],
+            fields=fields,
+        )
+        if result is None:
+            raise HTTPException(status_code=404, detail="Lobby not found")
+        if isinstance(result, dict) and result.get("error") == "forbidden":
+            raise HTTPException(status_code=403, detail="You can only update your own lobbies")
+        if isinstance(result, dict) and result.get("error") == "lobby_not_editable":
+            raise HTTPException(status_code=409, detail="Cannot update a cancelled or completed lobby")
+        if isinstance(result, dict) and result.get("error") == "route_not_found":
+            raise HTTPException(status_code=404, detail="Saved route not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to update lobby error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/api/lobbies/{lobby_id}/cancel")
+async def cancel_lobby_endpoint(
+    lobby_id: UUID,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        result = await cancel_lobby(lobby_id=lobby_id, organizer_id=user["id"])
+        if result is None:
+            raise HTTPException(status_code=404, detail="Lobby not found")
+        if isinstance(result, dict) and result.get("error") == "forbidden":
+            raise HTTPException(status_code=403, detail="You can only cancel your own lobbies")
+        if isinstance(result, dict) and result.get("error") == "lobby_not_cancellable":
+            raise HTTPException(status_code=409, detail="Cannot cancel a completed lobby")
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to cancel lobby error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/search")

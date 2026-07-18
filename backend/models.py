@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import List, Optional
 from uuid import UUID
 
@@ -333,5 +333,258 @@ class PlannedRunUpdate(BaseModel):
 
 class FollowNotificationsUpdate(BaseModel):
     enabled: bool
+
+    model_config = {"extra": "forbid"}
+
+
+# --- Run lobbies ---
+
+ALLOWED_LOBBY_RUN_TYPES = {"easy", "recovery", "long", "tempo", "intervals", "hills", "trail", "other"}
+ALLOWED_LOBBY_STATUSES = {"open", "full", "cancelled", "completed"}
+
+
+class RunLobbyCreate(BaseModel):
+    title: str
+    run_type: str
+    starts_at: datetime
+    city: str
+    area_label: Optional[str] = None
+    meeting_lat: float
+    meeting_lng: float
+    saved_route_id: Optional[UUID] = None
+    distance_m: Optional[int] = None
+    pace_min_sec_per_km: Optional[int] = None
+    pace_max_sec_per_km: Optional[int] = None
+    duration_minutes: Optional[int] = None
+    capacity: int = 10
+    description: Optional[str] = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v):
+        v = v.strip()
+        if not (1 <= len(v) <= 100):
+            raise ValueError("title must be 1-100 characters")
+        return v
+
+    @field_validator("city")
+    @classmethod
+    def validate_city(cls, v):
+        v = v.strip()
+        if not (1 <= len(v) <= 100):
+            raise ValueError("city must be 1-100 characters")
+        return v
+
+    @field_validator("area_label")
+    @classmethod
+    def validate_area_label(cls, v):
+        if v is not None and len(v) > 150:
+            raise ValueError("area_label must be 150 characters or fewer")
+        return v
+
+    @field_validator("run_type")
+    @classmethod
+    def validate_run_type(cls, v):
+        if v not in ALLOWED_LOBBY_RUN_TYPES:
+            raise ValueError(f"run_type must be one of: {', '.join(sorted(ALLOWED_LOBBY_RUN_TYPES))}")
+        return v
+
+    @field_validator("starts_at")
+    @classmethod
+    def validate_starts_at(cls, v):
+        if v.tzinfo is None:
+            raise ValueError("starts_at must be timezone-aware")
+        if v < datetime.now(v.tzinfo):
+            raise ValueError("starts_at must not be in the past")
+        return v
+
+    @field_validator("meeting_lat")
+    @classmethod
+    def validate_meeting_lat(cls, v):
+        if not (-90 <= v <= 90):
+            raise ValueError("meeting_lat must be between -90 and 90")
+        return v
+
+    @field_validator("meeting_lng")
+    @classmethod
+    def validate_meeting_lng(cls, v):
+        if not (-180 <= v <= 180):
+            raise ValueError("meeting_lng must be between -180 and 180")
+        return v
+
+    @field_validator("distance_m")
+    @classmethod
+    def validate_distance_m(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("distance_m must be > 0")
+        return v
+
+    @field_validator("duration_minutes")
+    @classmethod
+    def validate_duration_minutes(cls, v):
+        if v is not None and not (1 <= v <= 1440):
+            raise ValueError("duration_minutes must be 1-1440 or null")
+        return v
+
+    @field_validator("pace_min_sec_per_km")
+    @classmethod
+    def validate_pace_min(cls, v):
+        if v is not None and not (120 <= v <= 1800):
+            raise ValueError("pace_min_sec_per_km must be 120-1800 or null")
+        return v
+
+    @field_validator("pace_max_sec_per_km")
+    @classmethod
+    def validate_pace_max(cls, v):
+        if v is not None and not (120 <= v <= 1800):
+            raise ValueError("pace_max_sec_per_km must be 120-1800 or null")
+        return v
+
+    @model_validator(mode="after")
+    def validate_pace_pair(self):
+        if (self.pace_min_sec_per_km is not None and
+                self.pace_max_sec_per_km is not None and
+                self.pace_min_sec_per_km > self.pace_max_sec_per_km):
+            raise ValueError("pace_min_sec_per_km must be <= pace_max_sec_per_km")
+        return self
+
+    @field_validator("capacity")
+    @classmethod
+    def validate_capacity(cls, v):
+        if not (2 <= v <= 100):
+            raise ValueError("capacity must be 2-100")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and len(v) > 2000:
+            raise ValueError("description must be 2000 characters or fewer")
+        return v
+
+    model_config = {"extra": "forbid"}
+
+
+class RunLobbyUpdate(BaseModel):
+    title: Optional[str] = None
+    run_type: Optional[str] = None
+    starts_at: Optional[datetime] = None
+    city: Optional[str] = None
+    area_label: Optional[str] = None
+    meeting_lat: Optional[float] = None
+    meeting_lng: Optional[float] = None
+    saved_route_id: Optional[UUID] = None
+    distance_m: Optional[int] = None
+    pace_min_sec_per_km: Optional[int] = None
+    pace_max_sec_per_km: Optional[int] = None
+    duration_minutes: Optional[int] = None
+    capacity: Optional[int] = None
+    description: Optional[str] = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v):
+        if v is not None:
+            v = v.strip()
+            if not (1 <= len(v) <= 100):
+                raise ValueError("title must be 1-100 characters")
+        return v
+
+    @field_validator("city")
+    @classmethod
+    def validate_city(cls, v):
+        if v is not None:
+            v = v.strip()
+            if not (1 <= len(v) <= 100):
+                raise ValueError("city must be 1-100 characters")
+        return v
+
+    @field_validator("area_label")
+    @classmethod
+    def validate_area_label(cls, v):
+        if v is not None and len(v) > 150:
+            raise ValueError("area_label must be 150 characters or fewer")
+        return v
+
+    @field_validator("run_type")
+    @classmethod
+    def validate_run_type(cls, v):
+        if v is not None and v not in ALLOWED_LOBBY_RUN_TYPES:
+            raise ValueError(f"run_type must be one of: {', '.join(sorted(ALLOWED_LOBBY_RUN_TYPES))}")
+        return v
+
+    @field_validator("starts_at")
+    @classmethod
+    def validate_starts_at(cls, v):
+        if v is not None:
+            if v.tzinfo is None:
+                raise ValueError("starts_at must be timezone-aware")
+            if v < datetime.now(v.tzinfo):
+                raise ValueError("starts_at must not be in the past")
+        return v
+
+    @field_validator("meeting_lat")
+    @classmethod
+    def validate_meeting_lat(cls, v):
+        if v is not None and not (-90 <= v <= 90):
+            raise ValueError("meeting_lat must be between -90 and 90")
+        return v
+
+    @field_validator("meeting_lng")
+    @classmethod
+    def validate_meeting_lng(cls, v):
+        if v is not None and not (-180 <= v <= 180):
+            raise ValueError("meeting_lng must be between -180 and 180")
+        return v
+
+    @field_validator("distance_m")
+    @classmethod
+    def validate_distance_m(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("distance_m must be > 0")
+        return v
+
+    @field_validator("duration_minutes")
+    @classmethod
+    def validate_duration_minutes(cls, v):
+        if v is not None and not (1 <= v <= 1440):
+            raise ValueError("duration_minutes must be 1-1440 or null")
+        return v
+
+    @field_validator("pace_min_sec_per_km")
+    @classmethod
+    def validate_pace_min(cls, v):
+        if v is not None and not (120 <= v <= 1800):
+            raise ValueError("pace_min_sec_per_km must be 120-1800 or null")
+        return v
+
+    @field_validator("pace_max_sec_per_km")
+    @classmethod
+    def validate_pace_max(cls, v):
+        if v is not None and not (120 <= v <= 1800):
+            raise ValueError("pace_max_sec_per_km must be 120-1800 or null")
+        return v
+
+    @model_validator(mode="after")
+    def validate_pace_pair(self):
+        if (self.pace_min_sec_per_km is not None and
+                self.pace_max_sec_per_km is not None and
+                self.pace_min_sec_per_km > self.pace_max_sec_per_km):
+            raise ValueError("pace_min_sec_per_km must be <= pace_max_sec_per_km")
+        return self
+
+    @field_validator("capacity")
+    @classmethod
+    def validate_capacity(cls, v):
+        if v is not None and not (2 <= v <= 100):
+            raise ValueError("capacity must be 2-100")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and len(v) > 2000:
+            raise ValueError("description must be 2000 characters or fewer")
+        return v
 
     model_config = {"extra": "forbid"}
