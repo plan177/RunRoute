@@ -1,10 +1,12 @@
 import asyncio
 import logging
 import os
+import sys
 from datetime import timezone
 
 from dotenv import load_dotenv
 from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import InvalidToken
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 load_dotenv()
@@ -183,7 +185,11 @@ def main():
     app.add_error_handler(error_handler)
 
     logger.info(f"Bot started. Web App URL: {WEB_APP_URL}")
-    app.run_polling()
+    try:
+        app.run_polling()
+    except InvalidToken:
+        logger.error("Telegram rejected BOT_TOKEN; rotate the token in deployment variables")
+        sys.exit(1)
 
 
 if __name__ == '__main__':
