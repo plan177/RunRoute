@@ -15,6 +15,7 @@ const {
     isSameDay, getRunDayKey, buildCreateRunPayload, buildUpdateRunPayload,
     buildUpdateRunUrl, buildSaveRoutePayload, validatePointsCount,
     buildCurrentRouteFromApi, buildCalendarRunsUrl, fetchCalendarData,
+    validateSavedRouteForDisplay, classifyHttpError,
 } = ctx.RunRouteCalendarUtils || ctx.module.exports;
 
 // Also read production files for regression checks
@@ -876,5 +877,211 @@ describe('loadCalendarData integration', () => {
     it('index.html has cal-runs-status element', () => {
         assert.ok(indexHtml.includes('id="cal-runs-status"'),
             'index.html must contain cal-runs-status');
+    });
+});
+
+
+// --- validateSavedRouteForDisplay ---
+
+describe('validateSavedRouteForDisplay', () => {
+    it('accepts valid auto route', () => {
+        const route = { id: 'r1', name: 'Test', route_mode: 'auto', distance_m: 5000, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] };
+        const result = validateSavedRouteForDisplay(route);
+        assert.equal(result.id, 'r1');
+        assert.equal(result.route_mode, 'auto');
+        assert.equal(result.points.length, 2);
+    });
+
+    it('accepts valid manual route', () => {
+        const route = { id: 'r2', name: 'Manual', route_mode: 'manual', distance_m: 3000, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] };
+        const result = validateSavedRouteForDisplay(route);
+        assert.equal(result.route_mode, 'manual');
+    });
+
+    it('preserves time and accuracy for GPS track', () => {
+        const route = { id: 'r3', name: 'Track', route_mode: 'track', distance_m: 2000, points: [{ lat: 55.7, lng: 37.6, time: '2026-01-01T10:00:00Z', accuracy: 5 }, { lat: 55.8, lng: 37.7, time: '2026-01-01T10:05:00Z', accuracy: 3 }] };
+        const result = validateSavedRouteForDisplay(route);
+        assert.equal(result.route_mode, 'track');
+        assert.equal(result.points[0].time, '2026-01-01T10:00:00Z');
+        assert.equal(result.points[0].accuracy, 5);
+    });
+
+    it('rejects less than 2 points', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: 100, points: [{ lat: 55.7, lng: 37.6 }] }));
+    });
+
+    it('rejects missing points', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: 100 }));
+    });
+
+    it('rejects NaN in lat', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: 100, points: [{ lat: NaN, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('rejects Infinity in lng', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: 100, points: [{ lat: 55.7, lng: Infinity }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('rejects string lat', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: 100, points: [{ lat: '55.7', lng: 37.6 }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('rejects invalid route_mode', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'invalid', distance_m: 100, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('rejects negative distance_m', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ id: 'r', name: 'X', route_mode: 'auto', distance_m: -100, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('rejects missing id', () => {
+        assert.throws(() => validateSavedRouteForDisplay({ name: 'X', route_mode: 'auto', distance_m: 100, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] }));
+    });
+
+    it('does not mutate original route', () => {
+        const route = { id: 'r1', name: 'Test', route_mode: 'auto', distance_m: 5000, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] };
+        const origPoints = route.points;
+        validateSavedRouteForDisplay(route);
+        assert.equal(route.points, origPoints);
+    });
+});
+
+
+// --- classifyHttpError ---
+
+describe('classifyHttpError', () => {
+    it('401 returns auth message', () => {
+        assert.equal(classifyHttpError(401), 'Не удалось подтвердить авторизацию Telegram');
+    });
+    it('404 returns not found message', () => {
+        assert.equal(classifyHttpError(404), 'Маршрут не найден');
+    });
+    it('500 returns server message', () => {
+        assert.equal(classifyHttpError(500), 'Сервис временно недоступен');
+    });
+    it('502 returns server message', () => {
+        assert.equal(classifyHttpError(502), 'Сервис временно недоступен');
+    });
+    it('400 returns generic message', () => {
+        assert.equal(classifyHttpError(400), 'Не удалось загрузить маршрут');
+    });
+});
+
+
+// --- buildCurrentRouteFromApi ---
+
+describe('buildCurrentRouteFromApi', () => {
+    it('preserves source and saved_route_id', () => {
+        const apiRoute = { id: 'r1', name: 'Test', route_mode: 'auto', distance_m: 5000, points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }] };
+        const result = buildCurrentRouteFromApi(apiRoute, () => 'gpx-data');
+        assert.equal(result.source, 'saved');
+        assert.equal(result.saved_route_id, 'r1');
+        assert.equal(result.name, 'Test');
+        assert.equal(result.route_mode, 'auto');
+        assert.equal(result.distance_km, 5);
+        assert.equal(result.gpx, 'gpx-data');
+    });
+
+    it('does not mutate original points', () => {
+        const pts = [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }];
+        const apiRoute = { id: 'r1', name: 'Test', route_mode: 'auto', distance_m: 5000, points: pts };
+        buildCurrentRouteFromApi(apiRoute, () => 'gpx');
+        assert.equal(pts[0].lat, 55.7);
+    });
+});
+
+
+// --- openSavedRoute integration ---
+
+describe('openSavedRoute integration', () => {
+    it('uses buildRouteDetailUrl', () => {
+        assert.ok(appJs.includes('buildRouteDetailUrl(routeId)'),
+            'openSavedRoute must use buildRouteDetailUrl');
+    });
+
+    it('closes calendar-modal', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes("calendar-modal').classList.add('hidden')"),
+            'must close calendar-modal');
+    });
+
+    it('calls map.invalidateSize', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('map.invalidateSize()'),
+            'must call map.invalidateSize');
+    });
+
+    it('calls displayRoute', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('displayRoute(currentRoute)'),
+            'must call displayRoute');
+    });
+
+    it('calls showRouteButtons saved', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes("showRouteButtons('saved')"),
+            'must call showRouteButtons with saved');
+    });
+
+    it('shows toast on success', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes("Маршрут открыт"),
+            'must show success toast');
+    });
+
+    it('disables button during load', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('openBtn.disabled = true'),
+            'must disable button');
+    });
+
+    it('restores button in finally', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes("openBtn.disabled = false") && fnBody.includes("openBtn.textContent = 'Открыть'"),
+            'must restore button in finally');
+    });
+
+    it('does not call Valhalla or generateAutoRoute', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(!fnBody.includes('valhallaRoute'),
+            'must not call valhallaRoute');
+        assert.ok(!fnBody.includes('generateAutoRoute'),
+            'must not call generateAutoRoute');
+    });
+
+    it('does not change routeMode', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(!fnBody.includes('routeMode ='),
+            'must not change routeMode');
+    });
+
+    it('uses requestAnimationFrame for layout wait', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('requestAnimationFrame'),
+            'must use requestAnimationFrame for layout');
+    });
+
+    it('validates route with validateSavedRouteForDisplay', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('validateSavedRouteForDisplay'),
+            'must call validateSavedRouteForDisplay');
+    });
+
+    it('uses classifyHttpError for error messages', () => {
+        const fnStart = appJs.indexOf('async function openSavedRoute');
+        const fnBody = appJs.substring(fnStart, fnStart + 1500);
+        assert.ok(fnBody.includes('classifyHttpError'),
+            'must use classifyHttpError');
     });
 });

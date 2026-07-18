@@ -1845,6 +1845,8 @@ const {
     buildCurrentRouteFromApi,
     buildCalendarRunsUrl,
     fetchCalendarData,
+    validateSavedRouteForDisplay,
+    classifyHttpError,
 } = window.RunRouteCalendarUtils;
 
 let calYear, calMonth, calSelectedDate, calRuns = [], calRoutes = [];
@@ -2301,19 +2303,30 @@ function renderSavedRoutes() {
 
 async function openSavedRoute(routeId) {
     if (!isTelegramApp()) return;
+
+    const routeCard = document.querySelector('[data-route-id="' + routeId + '"]');
+    const openBtn = routeCard ? routeCard.querySelector('.route-action-primary') : null;
+    if (openBtn) { openBtn.disabled = true; openBtn.textContent = 'Загрузка…'; }
+
     try {
         const resp = await fetch(apiUrl(buildRouteDetailUrl(routeId)), { headers: getApiHeaders() });
-        if (!resp.ok) throw new Error('load');
+        if (!resp.ok) throw new Error(classifyHttpError(resp.status));
         const route = await resp.json();
-        if (!route.points || route.points.length < 2) throw new Error('empty');
+        const validated = validateSavedRouteForDisplay(route);
 
         document.getElementById('calendar-modal').classList.add('hidden');
 
-        currentRoute = buildCurrentRouteFromApi(route, makeGPX);
+        await new Promise(r => { requestAnimationFrame(() => requestAnimationFrame(r)); });
+        map.invalidateSize();
+
+        currentRoute = buildCurrentRouteFromApi(validated, makeGPX);
         displayRoute(currentRoute);
         showRouteButtons('saved');
+        showToast('Маршрут открыт');
     } catch (e) {
-        showToast('Не удалось загрузить маршрут');
+        showToast(e.message || 'Не удалось загрузить маршрут');
+    } finally {
+        if (openBtn) { openBtn.disabled = false; openBtn.textContent = 'Открыть'; }
     }
 }
 
