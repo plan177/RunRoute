@@ -1026,3 +1026,89 @@ async def test_cancel_lobby_owner_completed_blocked():
         result = await cancel_lobby(UUID("11111111-1111-1111-1111-111111111111"),
                                      UUID("00000000-0000-0000-0000-000000000001"))
         assert result == {"error": "lobby_not_cancellable"}
+
+
+# --- Cursor safety tests ---
+
+def _b64(obj):
+    import base64, json
+    return base64.urlsafe_b64encode(json.dumps(obj).encode()).decode().rstrip("=")
+
+
+def test_decode_cursor_json_array():
+    from backend.lobbies import _decode_cursor
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        _decode_cursor(_b64([]))
+
+
+def test_decode_cursor_json_null():
+    from backend.lobbies import _decode_cursor
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        _decode_cursor(_b64(None))
+
+
+def test_decode_cursor_json_string():
+    from backend.lobbies import _decode_cursor
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        _decode_cursor(_b64("hello"))
+
+
+def test_decode_cursor_invalid_base64():
+    from backend.lobbies import _decode_cursor
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        _decode_cursor("!!!not-base64!!!")
+
+
+def test_decode_cursor_wrong_length():
+    from backend.lobbies import _decode_cursor
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        _decode_cursor("abc")
+
+
+def test_decode_cursor_extra_keys():
+    from backend.lobbies import _decode_cursor
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        _decode_cursor(_b64({"s": "2027-06-15T12:00:00+00:00", "i": "11111111-1111-1111-1111-111111111111", "x": 1}))
+
+
+def test_decode_cursor_missing_keys():
+    from backend.lobbies import _decode_cursor
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        _decode_cursor(_b64({"s": "2027-06-15T12:00:00+00:00"}))
+
+
+def test_decode_cursor_naive_timestamp():
+    from backend.lobbies import _decode_cursor
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        _decode_cursor(_b64({"s": "2027-06-15T12:00:00", "i": "11111111-1111-1111-1111-111111111111"}))
+
+
+def test_decode_cursor_non_string_values():
+    from backend.lobbies import _decode_cursor
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        _decode_cursor(_b64({"s": 123, "i": 456}))
+
+
+def test_decode_cursor_valid():
+    from backend.lobbies import _decode_cursor
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    ts = datetime(2027, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+    lid = uuid4()
+    d_ts, d_id = _decode_cursor(_b64({"s": ts.isoformat(), "i": str(lid)}))
+    assert d_ts == ts
+    assert d_id == lid
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_malformed_cursor_returns_400():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/lobbies?cursor=!!!bad!!!",
+                               headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 400
+            assert resp.json()["detail"] == "Invalid cursor"

@@ -45,7 +45,11 @@ def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
             cursor += "=" * padding
         decoded = base64.urlsafe_b64decode(cursor.encode())
         payload = json.loads(decoded)
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid cursor")
         if set(payload.keys()) != {"s", "i"}:
+            raise ValueError("Invalid cursor")
+        if not isinstance(payload["s"], str) or not isinstance(payload["i"], str):
             raise ValueError("Invalid cursor")
         starts_at = datetime.fromisoformat(payload["s"])
         if starts_at.tzinfo is None:
