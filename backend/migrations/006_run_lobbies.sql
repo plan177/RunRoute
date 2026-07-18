@@ -29,8 +29,8 @@ CREATE TRIGGER trg_run_lobbies_updated_at
     BEFORE UPDATE ON public.run_lobbies
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-CREATE INDEX IF NOT EXISTS idx_run_lobbies_status_starts
-    ON public.run_lobbies (status, starts_at);
+CREATE INDEX IF NOT EXISTS idx_run_lobbies_status_starts_id
+    ON public.run_lobbies (status, starts_at, id);
 
 CREATE INDEX IF NOT EXISTS idx_run_lobbies_city_starts
     ON public.run_lobbies (city, starts_at);

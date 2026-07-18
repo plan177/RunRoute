@@ -1,13 +1,36 @@
 import base64
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
 from .database import get_db_pool
 
 logger = logging.getLogger(__name__)
+
+LOBBY_LIST_COLUMNS = """
+    l.id, l.title, l.run_type, l.starts_at, l.city, l.area_label,
+    l.meeting_lat, l.meeting_lng, l.distance_m, l.pace_min_sec_per_km,
+    l.pace_max_sec_per_km, l.duration_minutes, l.capacity, l.status,
+    l.saved_route_id, l.organizer_id, l.description,
+    l.created_at, l.updated_at,
+    sr.name AS route_name,
+    (SELECT COUNT(*) FROM public.run_lobby_participants lp
+     WHERE lp.lobby_id = l.id AND lp.status = 'joined') AS participant_count,
+    u.id AS org_user_id,
+    COALESCE(p.display_name, '') AS org_display_name,
+    p.avatar_url AS org_avatar_url,
+    p.city AS org_city,
+    p.club_name AS org_club_name
+"""
+
+LOBBY_LIST_FROM = """
+    FROM public.run_lobbies l
+    LEFT JOIN public.saved_routes sr ON sr.id = l.saved_route_id
+    JOIN public.users u ON u.id = l.organizer_id AND u.is_active = true
+    JOIN public.profiles p ON p.user_id = l.organizer_id AND p.is_public = true
+"""
 
 
 def _encode_cursor(starts_at: datetime, lobby_id: str) -> str:
@@ -22,30 +45,15 @@ def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
             cursor += "=" * padding
         decoded = base64.urlsafe_b64decode(cursor.encode())
         payload = json.loads(decoded)
+        if set(payload.keys()) != {"s", "i"}:
+            raise ValueError("Invalid cursor")
         starts_at = datetime.fromisoformat(payload["s"])
+        if starts_at.tzinfo is None:
+            raise ValueError("Invalid cursor")
         lobby_id = UUID(payload["i"])
         return starts_at, lobby_id
-    except Exception:
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
         raise ValueError("Invalid cursor")
-
-
-LOBBY_LIST_COLUMNS = """
-    l.id, l.title, l.run_type, l.starts_at, l.city, l.area_label,
-    l.meeting_lat, l.meeting_lng, l.distance_m, l.pace_min_sec_per_km,
-    l.pace_max_sec_per_km, l.duration_minutes, l.capacity, l.status,
-    l.saved_route_id, l.organizer_id, l.created_at, l.updated_at,
-    sr.name AS route_name,
-    (SELECT COUNT(*) FROM public.run_lobby_participants lp
-     WHERE lp.lobby_id = l.id AND lp.status = 'joined') AS participant_count
-"""
-
-LOBBY_LIST_FROM = """
-    FROM public.run_lobbies l
-    LEFT JOIN public.saved_routes sr ON sr.id = l.saved_route_id
-    JOIN public.users u ON u.id = l.organizer_id
-    JOIN public.profiles p ON p.user_id = l.organizer_id
-    WHERE u.is_active = true AND p.is_public = true
-"""
 
 
 def _build_list_query(
@@ -57,9 +65,13 @@ def _build_list_query(
     limit: int,
     cursor: Optional[str],
 ) -> tuple[str, list]:
-    conditions = [f"l.status = $1"]
+    conditions = ["l.status = $1"]
     params: list = [status]
     idx = 2
+
+    conditions.append(f"l.starts_at >= ${idx}")
+    params.append(from_dt)
+    idx += 1
 
     if city is not None:
         conditions.append(f"l.city = ${idx}")
@@ -69,11 +81,6 @@ def _build_list_query(
     if run_type is not None:
         conditions.append(f"l.run_type = ${idx}")
         params.append(run_type)
-        idx += 1
-
-    if from_dt is not None:
-        conditions.append(f"l.starts_at >= ${idx}")
-        params.append(from_dt)
         idx += 1
 
     if to_dt is not None:
@@ -92,12 +99,37 @@ def _build_list_query(
     sql = f"""
         SELECT {LOBBY_LIST_COLUMNS}
         {LOBBY_LIST_FROM}
-        AND {where}
+        WHERE {where}
         ORDER BY l.starts_at ASC, l.id ASC
         LIMIT ${idx}
     """
     params.append(limit + 1)
     return sql, params
+
+
+def _row_to_lobby_item(row) -> dict:
+    d = dict(row)
+    d["organizer"] = {
+        "user_id": d.pop("org_user_id"),
+        "display_name": d.pop("org_display_name") or None,
+        "avatar_url": d.pop("org_avatar_url"),
+        "city": d.pop("org_city"),
+        "club_name": d.pop("org_club_name"),
+    }
+    return d
+
+
+def _build_organizer_info(row) -> Optional[dict]:
+    if row is None:
+        return None
+    d = dict(row)
+    return {
+        "user_id": d["user_id"],
+        "display_name": d["display_name"] or None,
+        "avatar_url": d["avatar_url"],
+        "city": d["city"],
+        "club_name": d["club_name"],
+    }
 
 
 async def create_lobby(
@@ -120,7 +152,6 @@ async def create_lobby(
     pool = get_db_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            # 1. Check profile is public
             is_public = await conn.fetchval(
                 "SELECT is_public FROM public.profiles WHERE user_id = $1",
                 organizer_id,
@@ -128,17 +159,14 @@ async def create_lobby(
             if not is_public:
                 return {"error": "private_profile"}
 
-            # 2. Check saved_route_id ownership
             if saved_route_id is not None:
                 route_check = await conn.fetchval(
                     "SELECT id FROM public.saved_routes WHERE id = $1 AND user_id = $2",
-                    saved_route_id,
-                    organizer_id,
+                    saved_route_id, organizer_id,
                 )
                 if route_check is None:
                     return {"error": "route_not_found"}
 
-            # 3. Create lobby
             lobby_row = await conn.fetchrow(
                 """
                 INSERT INTO public.run_lobbies
@@ -158,25 +186,21 @@ async def create_lobby(
                 capacity, description,
             )
 
-            # 4. Create organizer participant
-            try:
-                await conn.execute(
-                    """
-                    INSERT INTO public.run_lobby_participants (lobby_id, user_id, role, status)
-                    VALUES ($1, $2, 'organizer', 'joined')
-                    """,
-                    lobby_row["id"],
-                    organizer_id,
-                )
-            except Exception:
-                raise
+            await conn.execute(
+                """
+                INSERT INTO public.run_lobby_participants (lobby_id, user_id, role, status)
+                VALUES ($1, $2, 'organizer', 'joined')
+                """,
+                lobby_row["id"],
+                organizer_id,
+            )
 
             lobby = dict(lobby_row)
             lobby["participant_count"] = 1
             return lobby
 
 
-async def get_lobby(lobby_id: UUID) -> Optional[dict]:
+async def get_lobby(lobby_id: UUID, viewer_id: Optional[UUID] = None) -> Optional[dict]:
     pool = get_db_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -191,6 +215,8 @@ async def get_lobby(lobby_id: UUID) -> Optional[dict]:
                     WHERE lp.lobby_id = l.id AND lp.status = 'joined') AS participant_count
             FROM public.run_lobbies l
             LEFT JOIN public.saved_routes sr ON sr.id = l.saved_route_id
+            JOIN public.users u ON u.id = l.organizer_id AND u.is_active = true
+            JOIN public.profiles p ON p.user_id = l.organizer_id AND p.is_public = true
             WHERE l.id = $1
             """,
             lobby_id,
@@ -212,7 +238,7 @@ async def get_organizer_info(organizer_id: UUID) -> Optional[dict]:
             """,
             organizer_id,
         )
-    return dict(row) if row else None
+    return _build_organizer_info(row)
 
 
 async def list_lobbies(
@@ -223,13 +249,16 @@ async def list_lobbies(
     limit: int = 20,
     cursor: Optional[str] = None,
 ) -> dict:
+    if from_dt is None:
+        from_dt = datetime.now(timezone.utc)
+
     sql, params = _build_list_query(city, run_type, from_dt, to_dt, "open", limit, cursor)
     pool = get_db_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(sql, *params)
 
     has_next = len(rows) > limit
-    items = [dict(r) for r in rows[:limit]]
+    items = [_row_to_lobby_item(r) for r in rows[:limit]]
 
     next_cursor = None
     if has_next and items:
@@ -248,23 +277,16 @@ async def update_lobby(
     async with pool.acquire() as conn:
         async with conn.transaction():
             existing = await conn.fetchrow(
-                "SELECT id, status FROM public.run_lobbies WHERE id = $1",
+                "SELECT organizer_id, status FROM public.run_lobbies WHERE id = $1 FOR UPDATE",
                 lobby_id,
             )
             if existing is None:
                 return None
+            if existing["organizer_id"] != organizer_id:
+                return {"error": "forbidden"}
             if existing["status"] in ("cancelled", "completed"):
                 return {"error": "lobby_not_editable"}
 
-            # Verify ownership
-            owner = await conn.fetchval(
-                "SELECT organizer_id FROM public.run_lobbies WHERE id = $1",
-                lobby_id,
-            )
-            if owner != organizer_id:
-                return {"error": "forbidden"}
-
-            # Check saved_route_id ownership if changing
             if "saved_route_id" in fields:
                 rid = fields["saved_route_id"]
                 if rid is not None:
@@ -305,6 +327,27 @@ async def update_lobby(
                 )
                 return dict(row)
 
+            pace_min_key = "pace_min_sec_per_km" in fields
+            pace_max_key = "pace_max_sec_per_km" in fields
+            if pace_min_key or pace_max_key:
+                if pace_min_key and pace_max_key:
+                    final_min = fields["pace_min_sec_per_km"]
+                    final_max = fields["pace_max_sec_per_km"]
+                elif pace_min_key:
+                    final_min = fields["pace_min_sec_per_km"]
+                    final_max = await conn.fetchval(
+                        "SELECT pace_max_sec_per_km FROM public.run_lobbies WHERE id = $1",
+                        lobby_id,
+                    )
+                else:
+                    final_max = fields["pace_max_sec_per_km"]
+                    final_min = await conn.fetchval(
+                        "SELECT pace_min_sec_per_km FROM public.run_lobbies WHERE id = $1",
+                        lobby_id,
+                    )
+                if final_min is not None and final_max is not None and final_min > final_max:
+                    return {"error": "invalid_pace_pair"}
+
             sql = f"""
                 UPDATE public.run_lobbies SET {', '.join(set_clauses)}
                 WHERE id = ${idx}
@@ -323,17 +366,16 @@ async def cancel_lobby(lobby_id: UUID, organizer_id: UUID) -> Optional[dict]:
     async with pool.acquire() as conn:
         async with conn.transaction():
             existing = await conn.fetchrow(
-                "SELECT id, status FROM public.run_lobbies WHERE id = $1",
+                "SELECT organizer_id, status FROM public.run_lobbies WHERE id = $1 FOR UPDATE",
                 lobby_id,
             )
             if existing is None:
                 return None
-
+            if existing["organizer_id"] != organizer_id:
+                return {"error": "forbidden"}
             if existing["status"] == "completed":
                 return {"error": "lobby_not_cancellable"}
-
             if existing["status"] == "cancelled":
-                # Idempotent
                 row = await conn.fetchrow(
                     """
                     SELECT id, organizer_id, saved_route_id, title, run_type, starts_at, city,
@@ -345,13 +387,6 @@ async def cancel_lobby(lobby_id: UUID, organizer_id: UUID) -> Optional[dict]:
                     lobby_id,
                 )
                 return dict(row)
-
-            owner = await conn.fetchval(
-                "SELECT organizer_id FROM public.run_lobbies WHERE id = $1",
-                lobby_id,
-            )
-            if owner != organizer_id:
-                return {"error": "forbidden"}
 
             row = await conn.fetchrow(
                 """

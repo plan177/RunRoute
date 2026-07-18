@@ -506,7 +506,7 @@ async def list_lobbies_endpoint(
     from_date: Optional[str] = Query(None, alias="from"),
     to_date: Optional[str] = Query(None, alias="to"),
     limit: int = Query(20, ge=1, le=100),
-    cursor: Optional[str] = Query(None),
+    cursor: Optional[str] = Query(None, max_length=2048),
     telegram_user: dict = Depends(get_current_telegram_user),
 ):
     try:
@@ -558,7 +558,15 @@ async def get_lobby_endpoint(
     telegram_user: dict = Depends(get_current_telegram_user),
 ):
     try:
-        lobby = await get_lobby(lobby_id)
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        lobby = await get_lobby(lobby_id, viewer_id=me["id"])
         if lobby is None:
             raise HTTPException(status_code=404, detail="Lobby not found")
 
@@ -628,6 +636,10 @@ async def update_lobby_endpoint(
             raise HTTPException(status_code=409, detail="Cannot update a cancelled or completed lobby")
         if isinstance(result, dict) and result.get("error") == "route_not_found":
             raise HTTPException(status_code=404, detail="Saved route not found")
+        if isinstance(result, dict) and result.get("error") == "invalid_pace_pair":
+            raise HTTPException(status_code=422, detail="pace_min_sec_per_km must be <= pace_max_sec_per_km")
+        if isinstance(result, dict) and result.get("error") == "invalid_pace_pair":
+            raise HTTPException(status_code=422, detail="pace_min_sec_per_km must be <= pace_max_sec_per_km")
         return result
     except HTTPException:
         raise
