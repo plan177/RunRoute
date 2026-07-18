@@ -20,6 +20,41 @@ WEB_APP_URL = os.getenv('WEB_APP_URL', 'https://run-route-ten.vercel.app')
 
 WORKER_INTERVAL_SECONDS = 30
 
+SAFE_ERROR_CODES = frozenset({
+    "telegram_forbidden",
+    "telegram_timeout",
+    "telegram_network_error",
+    "telegram_api_error",
+    "unexpected_error",
+})
+
+
+def _classify_send_error(exc: Exception) -> str:
+    """Classify a send_message exception into a safe error code.
+
+    Never uses str(), repr(), or traceback -- only isinstance checks
+    and exception class names.
+    """
+    from telegram.error import Forbidden, TimedOut, NetworkError
+
+    if isinstance(exc, Forbidden):
+        return "telegram_forbidden"
+    if isinstance(exc, TimedOut):
+        return "telegram_timeout"
+    if isinstance(exc, NetworkError):
+        return "telegram_network_error"
+
+    exc_name = type(exc).__name__
+    if "forbidden" in exc_name.lower():
+        return "telegram_forbidden"
+    if "timeout" in exc_name.lower():
+        return "telegram_timeout"
+    if "network" in exc_name.lower():
+        return "telegram_network_error"
+
+    return "unexpected_error"
+
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -134,13 +169,10 @@ async def process_due_reminders_once(bot) -> int:
             await mark_sent(run["id"])
             sent_count += 1
         except Exception as e:
-            error_str = str(e)
-            if "blocked" in error_str.lower() or "forbidden" in error_str.lower():
-                logger.warning("User blocked the bot, marking reminder failed")
-                await mark_failed(run["id"], "user_blocked")
-            else:
-                logger.error("Failed to send reminder: %s", error_str[:200])
-                await mark_failed(run["id"], error_str[:500])
+            error_code = _classify_send_error(e)
+            logger.error("Failed to send reminder action=send_message error_type=%s",
+                         type(e).__name__)
+            await mark_failed(run["id"], error_code)
 
     return sent_count
 
