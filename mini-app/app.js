@@ -1844,6 +1844,7 @@ const {
     buildRouteDeleteUrl,
     buildCurrentRouteFromApi,
     buildCalendarRunsUrl,
+    fetchCalendarData,
 } = window.RunRouteCalendarUtils;
 
 let calYear, calMonth, calSelectedDate, calRuns = [], calRoutes = [];
@@ -1859,25 +1860,61 @@ function initCalendar() {
 
     document.getElementById('cal-prev').addEventListener('click', async () => {
         calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; }
-        try { await loadCalendarData(); } catch (e) {
-            calRuns = [];
-            const status = document.getElementById('calendar-status');
-            const messages = { auth: 'Не удалось подтвердить авторизацию Telegram', not_found: 'Календарь ещё не доступен на сервере', server: 'Сервис календаря временно недоступен', network: 'Не удалось подключиться к серверу' };
-            status.textContent = messages[e.message] || 'Не удалось загрузить данные';
+        const result = await loadCalendarData();
+        const status = document.getElementById('calendar-status');
+        const runsStatus = document.getElementById('cal-runs-status');
+        const errorMessages = {
+            auth: 'Не удалось подтвердить авторизацию Telegram',
+            not_found: 'Календарь ещё не доступен на сервере',
+            server: 'Сервис календаря временно недоступен',
+            network: 'Не удалось подключиться к серверу',
+        };
+        if (result.runsError && result.routesError) {
+            const msg = result.runsError === result.routesError
+                ? errorMessages[result.runsError]
+                : 'Не удалось загрузить данные';
+            status.textContent = msg || 'Не удалось загрузить данные';
             status.className = 'profile-status error';
             status.classList.remove('hidden');
+        } else {
+            status.classList.add('hidden');
+        }
+        if (result.runsError) {
+            safeSetText(runsStatus, errorMessages[result.runsError] || 'Ошибка загрузки пробежек');
+            runsStatus.className = 'profile-status error';
+            runsStatus.classList.remove('hidden');
+        } else {
+            runsStatus.classList.add('hidden');
         }
         renderCalendar();
     });
     document.getElementById('cal-next').addEventListener('click', async () => {
         calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; }
-        try { await loadCalendarData(); } catch (e) {
-            calRuns = [];
-            const status = document.getElementById('calendar-status');
-            const messages = { auth: 'Не удалось подтвердить авторизацию Telegram', not_found: 'Календарь ещё не доступен на сервере', server: 'Сервис календаря временно недоступен', network: 'Не удалось подключиться к серверу' };
-            status.textContent = messages[e.message] || 'Не удалось загрузить данные';
+        const result = await loadCalendarData();
+        const status = document.getElementById('calendar-status');
+        const runsStatus = document.getElementById('cal-runs-status');
+        const errorMessages = {
+            auth: 'Не удалось подтвердить авторизацию Telegram',
+            not_found: 'Календарь ещё не доступен на сервере',
+            server: 'Сервис календаря временно недоступен',
+            network: 'Не удалось подключиться к серверу',
+        };
+        if (result.runsError && result.routesError) {
+            const msg = result.runsError === result.routesError
+                ? errorMessages[result.runsError]
+                : 'Не удалось загрузить данные';
+            status.textContent = msg || 'Не удалось загрузить данные';
             status.className = 'profile-status error';
             status.classList.remove('hidden');
+        } else {
+            status.classList.add('hidden');
+        }
+        if (result.runsError) {
+            safeSetText(runsStatus, errorMessages[result.runsError] || 'Ошибка загрузки пробежек');
+            runsStatus.className = 'profile-status error';
+            runsStatus.classList.remove('hidden');
+        } else {
+            runsStatus.classList.add('hidden');
         }
         renderCalendar();
     });
@@ -1894,35 +1931,29 @@ async function loadCalendarData() {
     const seq = ++calRequestSeq;
     const from = calGetMonthStart(calYear, calMonth);
     const to = calGetMonthEnd(calYear, calMonth);
+
+    let runsResult, routesResult;
     try {
-        const [runsResp, routesResp] = await Promise.all([
+        [runsResult, routesResult] = await Promise.allSettled([
             fetch(apiUrl(buildCalendarRunsUrl(from, to)), { headers: getApiHeaders() }),
             fetch(apiUrl('/api/routes'), { headers: getApiHeaders() }),
         ]);
-        if (seq !== calRequestSeq) return;
-
-        if (runsResp.ok) {
-            const runsData = await runsResp.json();
-            calRuns = runsData.runs || [];
-        } else {
-            calRuns = [];
-            if (runsResp.status === 401) throw new Error('auth');
-            if (runsResp.status === 404) throw new Error('not_found');
-            if (runsResp.status >= 500) throw new Error('server');
-            throw new Error('unknown');
-        }
-
-        if (routesResp.ok) {
-            const routesData = await routesResp.json();
-            calRoutes = dedupRoutesById(routesData.routes || []);
-        }
-    } catch (e) {
-        if (seq !== calRequestSeq) return;
-        if (e.message === 'auth' || e.message === 'not_found' || e.message === 'server' || e.message === 'unknown') {
-            throw e;
-        }
-        throw new Error('network');
+    } catch {
+        if (seq !== calRequestSeq) return { runsError: null, routesError: null };
+        return { runsError: 'network', routesError: 'network' };
     }
+
+    if (seq !== calRequestSeq) return { runsError: null, routesError: null };
+
+    const runsFetch = runsResult.status === 'fulfilled' ? runsResult.value : { _networkError: true };
+    const routesFetch = routesResult.status === 'fulfilled' ? routesResult.value : { _networkError: true };
+
+    const result = await fetchCalendarData(runsFetch, routesFetch, dedupRoutesById);
+
+    calRuns = result.runs;
+    calRoutes = result.routes;
+
+    return { runsError: result.runsError, routesError: result.routesError };
 }
 
 async function openCalendar() {
@@ -1930,6 +1961,7 @@ async function openCalendar() {
     const loading = document.getElementById('calendar-loading');
     const content = document.getElementById('calendar-content');
     const status = document.getElementById('calendar-status');
+    const runsStatus = document.getElementById('cal-runs-status');
 
     if (!isTelegramApp()) {
         modal.classList.remove('hidden');
@@ -1945,24 +1977,45 @@ async function openCalendar() {
     loading.classList.remove('hidden');
     content.classList.add('hidden');
     status.classList.add('hidden');
+    if (runsStatus) { runsStatus.classList.add('hidden'); safeSetText(runsStatus, ''); }
+    const routesStatus = document.getElementById('cal-routes-status');
+    if (routesStatus) { routesStatus.classList.add('hidden'); safeSetText(routesStatus, ''); }
 
-    try {
-        await loadCalendarData();
-        loading.classList.add('hidden');
-        content.classList.remove('hidden');
-        renderCalendar();
-    } catch (e) {
-        loading.classList.add('hidden');
-        content.classList.add('hidden');
-        const messages = {
-            auth: 'Не удалось подтвердить авторизацию Telegram',
-            not_found: 'Календарь ещё не доступен на сервере',
-            server: 'Сервис календаря временно недоступен',
-            network: 'Не удалось подключиться к серверу',
-        };
-        status.textContent = messages[e.message] || 'Не удалось загрузить данные';
+    const result = await loadCalendarData();
+    loading.classList.add('hidden');
+
+    const errorMessages = {
+        auth: 'Не удалось подтвердить авторизацию Telegram',
+        not_found: 'Календарь ещё не доступен на сервере',
+        server: 'Сервис календаря временно недоступен',
+        network: 'Не удалось подключиться к серверу',
+    };
+
+    if (result.runsError && result.routesError) {
+        // Both failed
+        const msg = result.runsError === result.routesError
+            ? errorMessages[result.runsError]
+            : 'Не удалось загрузить данные';
+        status.textContent = msg || 'Не удалось загрузить данные';
         status.className = 'profile-status error';
         status.classList.remove('hidden');
+        return;
+    }
+
+    // At least one succeeded — show content
+    content.classList.remove('hidden');
+    renderCalendar();
+
+    if (result.runsError) {
+        safeSetText(runsStatus, errorMessages[result.runsError] || 'Ошибка загрузки пробежек');
+        runsStatus.className = 'profile-status error';
+        runsStatus.classList.remove('hidden');
+    }
+
+    if (result.routesError) {
+        safeSetText(routesStatus, errorMessages[result.routesError] || 'Ошибка загрузки маршрутов');
+        routesStatus.className = 'profile-status error';
+        routesStatus.classList.remove('hidden');
     }
 }
 
