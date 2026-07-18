@@ -16,22 +16,49 @@ Database pool initialized
 При этом в открытом Supabase SQL Editor:
 
 - `public.schema_migrations` возвращает пустую таблицу или ошибку
-- `users`, `profiles`, `saved_routes`, `planned_runs`, `follows` возвращают `NULL` / 0 строк
+- `users`, `profiles`, `saved_routes`, `planned_runs`, `follows` возвращают 0 строк
 
-**Почему это значит разные target database:**
+**Почему это требует проверки:**
 
 `migrate.py` (строка 30) создаёт `public.schema_migrations` через `CREATE TABLE IF NOT EXISTS` и записывает туда имя каждого применённого SQL-файла (строка 52). Если Apply прошёл успешно, значит:
 
 1. Migration подключилась к `DATABASE_URL` из Railway variables.
 2. Таблица `public.schema_migrations` была создана и в неё были вставлены записи.
 
-Если Supabase SQL Editor не видит ни таблицы, ни данных — значит SQL Editor подключён к другой PostgreSQL instance, другому project, или другой database branch. Это **не может** быть одной и той же БД.
+Однако **логи миграции не являются доказательством**, если не подтверждено, что:
+- Логи относятся к текущему Railway project, service и environment
+- Deployment timestamp совпадает с ожидаемым
+
+Логи из другого environment или устаревший deployment не отражают текущее состояние production-БД.
 
 **Ключевой факт:** `config.py:26-35` нормализует `postgres://` → `postgresql://`, что типично для Supabase pooler URLs. Сам URL хранится в `SecretStr` и никогда не логируется.
 
 ---
 
-## 2. Как безопасно сопоставить DATABASE_URL
+## 2. Порядок диагностики
+
+> **Важно:** Не пропускайте шаги. Сначала убедитесь, что смотрите на правильные проект и environment.
+
+### Шаг 1. Проверить Railway project, service и environment
+
+1. Откройте Railway Dashboard.
+2. Убедитесь, что выбран правильный **project** (RunRoute).
+3. Убедитесь, что выбран правильный **service** (API, не Bot).
+4. Убедитесь, что выбран правильный **environment** (production).
+5. Проверьте **deployment timestamp** — логи миграции должны относиться к текущему или недавнему deployment.
+
+### Шаг 2. Проверить, что логи миграции относятся к этому service/environment
+
+- Логи `Applied: 005_...` должны быть из текущего deployment
+- Старые логи из другого environment не считаются
+
+### Шаг 3. Сравнить базы
+
+Только после шагов 1–2 выполнять запросы из разделов 3–4 и сравнивать результаты.
+
+---
+
+## 3. Как безопасно сопоставить DATABASE_URL
 
 > **ВАЖНО:** Не копируйте и не передавайте полный URL. Смотрите только на структурные поля.
 
@@ -40,11 +67,10 @@ Database pool initialized
 | Поле URL | Что искать | Ожидание для Supabase |
 |----------|------------|----------------------|
 | hostname | Домен подключения | Содержит `supabase.co` или `railway.internal` (Railway own PG) |
-| database name | Имя БД после `/` | Совпадает с Supabase project ref |
-| Supabase project ref | Подстрока в hostname или username | `siquoydstcdbkxvcmbzu` (или другой ref проекта) |
-| Pooler mode | `?sslmode=require` | Supabase pooler обычно `require` |
-| порт | Число после `:` | `5432` (direct), `6543` (pooler), `32149` (Supabase pooler) |
-| username | Часть до `@` | Может содержать `postgres.<ref>` или `supabase` |
+| database name | Имя БД после `/` | Для Supabase обычно `postgres` |
+| Supabase project ref | Подстрока в username (формат `postgres.<ref>`) | `siquoydstcdbkxvcmbzu` (или другой ref проекта) |
+| порт | Число после `:` | `5432` (direct / session pooler), `6543` (transaction pooler) |
+| username | Часть до `@` | Может содержать `postgres.<ref>` |
 
 **Формат Supabase URL:**
 
@@ -54,21 +80,53 @@ postgresql://postgres.<PROJECT_REF>:<PASSWORD>@<HOST>:<PORT>/<DATABASE>
 
 Ожидаемый PROJECT_REF: `siquoydstcdbkxvcmbzu`
 
-**Пример hostname (без реального значения):**
+**Типовые hostname:**
 
 - Supabase pooler: `aws-0-<region>.pooler.supabase.com`
 - Supabase direct: `db.<ref>.supabase.co`
 - Railway own PG: `<service-name>-<random>.railway.internal`
 
+**Важно:**
+
+- Session pooler и transaction pooler могут использовать общий hostname, который не содержит project ref
+- Разные IP и разные пользователи не обязательно означают разные базы при использовании pooler
+- `current_user`, `version()` и `inet_server_addr()` **не являются** самостоятельным доказательством принадлежности проекту
+
 > **Не записывайте реальные hostname/database/username в эту документацию.**
 
 ---
 
-## 3. Read-only SQL для Railway Target Database
+## 4. Способы выполнения read-only SQL
 
-Выполните эти запросы из приложения (через Railway Logs или временный read-only endpoint), **не** через Supabase SQL Editor.
+Все проверки должны оставаться read-only. Не предлагайте временные HTTP endpoint.
 
-### 3.1. Идентификация БД
+### Вариант A: Supabase SQL Editor
+
+Подключитесь к базе выбранного Supabase project через Dashboard → SQL Editor.
+
+### Вариант B: Railway CLI
+
+Одноразовая локальная команда с переменными выбранного Railway environment:
+
+```bash
+railway run psql "$DATABASE_URL" -c "SELECT current_database();"
+```
+
+### Вариант C: psql через локальное защищённое подключение
+
+```bash
+psql "$DATABASE_URL" -c "SELECT current_database();"
+```
+
+Все команды используют переменную окружения и **не печатают** DATABASE_URL.
+
+---
+
+## 5. Read-only SQL для Railway Target Database
+
+Выполните эти запросы одним из способов из раздела 4.
+
+### 5.1. Идентификация БД
 
 ```sql
 SELECT current_database() AS db_name,
@@ -77,20 +135,14 @@ SELECT current_database() AS db_name,
        version() AS pg_version;
 ```
 
-Ожидаемый результат для Supabase:
-- `current_user` содержит `postgres.<ref>` или `supabase`
-- `version()` содержит `PostgreSQL ... on x86_64-pc-linux-gnu` (Supabase hosts)
-
-### 3.2. Поиск Supabase project ref в hostname/username
+### 5.2. IP и порт сервера
 
 ```sql
 SELECT inet_server_addr() AS server_ip,
        inet_server_port() AS server_port;
 ```
 
-Если `inet_server_addr()` возвращает IP — это прямое подключение. Если NULL — pooler.
-
-### 3.3. Список всех таблиц в public schema
+### 5.3. Список всех таблиц в public schema
 
 ```sql
 SELECT tablename
@@ -99,35 +151,31 @@ WHERE schemaname = 'public'
 ORDER BY tablename;
 ```
 
-Ожидаемый набор таблиц (миграции 001–006):
+Ожидаемый набор таблиц (миграции 001–005):
 
 ```
 follows
 planned_runs
 profiles
 reminder_deliveries
-run_lobby_participants
-run_lobbies
 saved_routes
 schema_migrations
 users
 ```
 
-### 3.4. Проверка каждой таблицы через to_regclass
+### 5.4. Проверка каждой таблицы через to_regclass
 
 ```sql
-SELECT 'users' AS tbl, to_regclass('public.users') IS NOT NULL AS exists
-UNION ALL SELECT 'profiles',        to_regclass('public.profiles') IS NOT NULL
-UNION ALL SELECT 'saved_routes',    to_regclass('public.saved_routes') IS NOT NULL
-UNION ALL SELECT 'planned_runs',    to_regclass('public.planned_runs') IS NOT NULL
-UNION ALL SELECT 'follows',         to_regclass('public.follows') IS NOT NULL
-UNION ALL SELECT 'reminder_deliveries', to_regclass('public.reminder_deliveries') IS NOT NULL
-UNION ALL SELECT 'run_lobbies',     to_regclass('public.run_lobbies') IS NOT NULL
-UNION ALL SELECT 'run_lobby_participants', to_regclass('public.run_lobby_participants') IS NOT NULL
-UNION ALL SELECT 'schema_migrations', to_regclass('public.schema_migrations') IS NOT NULL;
+SELECT 'schema_migrations' AS tbl, to_regclass('public.schema_migrations') IS NOT NULL AS exists
+UNION ALL SELECT 'users',          to_regclass('public.users') IS NOT NULL
+UNION ALL SELECT 'profiles',       to_regclass('public.profiles') IS NOT NULL
+UNION ALL SELECT 'saved_routes',   to_regclass('public.saved_routes') IS NOT NULL
+UNION ALL SELECT 'planned_runs',   to_regclass('public.planned_runs') IS NOT NULL
+UNION ALL SELECT 'follows',        to_regclass('public.follows') IS NOT NULL
+UNION ALL SELECT 'reminder_deliveries', to_regclass('public.reminder_deliveries') IS NOT NULL;
 ```
 
-### 3.5. Список применённых миграций
+### 5.5. Список применённых миграций
 
 ```sql
 SELECT filename, applied_at
@@ -135,7 +183,7 @@ FROM public.schema_migrations
 ORDER BY filename;
 ```
 
-Ожидаемый результат (6 миграций):
+Ожидаемый результат (5 миграций):
 
 ```
 001_users_profiles.sql
@@ -143,12 +191,14 @@ ORDER BY filename;
 003_saved_routes_and_planned_runs.sql
 004_planned_run_reminders.sql
 005_public_profiles_and_follows.sql
-006_run_lobbies.sql
 ```
 
-### 3.6. Количество записей (COUNT без PII)
+> **Список filename из `schema_migrations` — основной прикладной индикатор.** Совпадение `current_database` / `current_user` / IP недостаточно.
+
+### 5.6. Количество записей (COUNT, только после проверки to_regclass)
 
 ```sql
+-- Выполнить только если to_regclass('public.users') NOT NULL
 SELECT
   (SELECT count(*) FROM public.users)        AS users_count,
   (SELECT count(*) FROM public.profiles)     AS profiles_count,
@@ -157,14 +207,14 @@ SELECT
   (SELECT count(*) FROM public.follows)      AS follows_count;
 ```
 
-### 3.7. Последняя дата миграции
+### 5.7. Последняя дата миграции
 
 ```sql
 SELECT max(applied_at) AS last_migration_at
 FROM public.schema_migrations;
 ```
 
-### 3.8. Search path
+### 5.8. Search path
 
 ```sql
 SELECT current_setting('search_path') AS search_path;
@@ -174,71 +224,85 @@ SELECT current_setting('search_path') AS search_path;
 
 ---
 
-## 4. Read-only SQL для Supabase SQL Editor
+## 6. Read-only SQL для Supabase SQL Editor
 
-Выполните **те же самые запросы** из Supabase SQL Editor (Dashboard → SQL Editor → New query).
+Выполните **те же самые запросы** из Supabase SQL Editor (Dashboard → SQL Editor → New query), подключившись к базе **ожидаемого** Supabase project (`siquoydstcdbkxvcmbzu`).
 
-Все запросы из раздела 3 — read-only (SELECT), безопасны для выполнения в SQL Editor.
-
-### 4.1. Дополнительная проверка: Supabase project identity
-
-```sql
-SELECT current_database() AS db_name,
-       current_user AS db_user,
-       current_schema() AS schema,
-       version() AS pg_version;
-```
-
-### 4.2. Проверка是否有 schema_migrations
-
-```sql
-SELECT EXISTS (
-  SELECT 1 FROM information_schema.tables
-  WHERE table_schema = 'public'
-    AND table_name = 'schema_migrations'
-) AS has_schema_migrations;
-```
+Все запросы из раздела 5 — read-only (SELECT), безопасны для выполнения в SQL Editor.
 
 ---
 
-## 5. Таблица сравнения
+## 7. Таблица сравнения
 
 | Признак | Railway Target | Supabase SQL Editor | Совпадает? | Вывод |
 |---------|---------------|---------------------|-----------|-------|
-| `current_database()` | ? | ? | | имя БД |
+| `current_database()` | ? | ? | | имя БД (для Supabase обычно `postgres`) |
 | `current_user` | ? | ? | | пользователь подключения |
 | `version()` | ? | ? | | версия PostgreSQL |
 | `inet_server_addr()` | ? | ? | | IP сервера |
 | `inet_server_port()` | ? | ? | | порт |
 | Таблица `schema_migrations` существует | ? | ? | | ключевой индикатор |
-| Количество миграций (001–006) | ? | ? | | applied files |
+| Список filename из `schema_migrations` | ? | ? | | **основной прикладной индикатор** |
 | Последний `applied_at` | ? | ? | | временная метка |
-| Таблица `users` существует | ? | ? | | объектная модель |
-| `users_count` | ? | ? | | реальные данные |
+| `users_count` | ? | ? | | реальные данные (после to_regclass) |
 | `profiles_count` | ? | ? | | реальные данные |
 | `routes_count` | ? | ? | | реальные данные |
 | `runs_count` | ? | ? | | реальные данные |
 | `follows_count` | ? | ? | | реальные данные |
-| `search_path` | ? | ? | | схема поиска |
 
 **Заполните таблицу и сравните строки.**
 
 ---
 
-## 6. Возможные сценарии
+## 8. Дерево решений
+
+После заполнения таблицы сравнения определите категорию:
+
+### Доказано: разные базы
+
+Если выполняется **любое** из:
+
+- `schema_migrations` существует в одной БД и отсутствует в другой
+- Список filename完全不同 (разные наборы миграций)
+- Один из `users_count > 0`, а другой `= 0` (при одинаковом `schema_migrations`)
+
+**Вывод:** Railway API и Supabase SQL Editor подключены к разным БД. Определите, в какой БД находятся production-данные.
+
+### Вероятно: разные базы
+
+Если выполняется **любое** из:
+
+- `schema_migrations` существует в обеих, но набор filename отличается
+- Разные `current_database()` при совпадающих `schema_migrations`
+- Hostname/порт указывают на разные инстансы
+
+**Вывод:** Скорее всего разные БД. Требуется дополнительная проверка (hostname, project ref в Dashboard).
+
+### Данных недостаточно
+
+Если:
+
+- Результаты частично совпадают, частично отличаются
+- Не удалось выполнить часть запросов
+- Используется pooler и IP/пользователи отличаются, но `schema_migrations` совпадает
+
+**Вывод:** Нужна дополнительная информация. Проверьте project ref в Supabase Dashboard и comparison hostname из connection string.
+
+---
+
+## 9. Возможные сценарии
 
 ### A. Railway DATABASE_URL указывает на другой Supabase project
 
 **Как подтвердить:**
 
-- `current_database()` в Railway: имя БД другого проекта (отличается от `siquoydstcdbkxvcmbzu`)
-- `current_user`: `postgres.<другой-ref>` или другой username
-- `inet_server_addr()`: другой IP
+- Project ref в username connection string отличается от `siquoydstcdbkxvcmbzu`
+- `schema_migrations` не содержит ожидаемых миграций
 
 **Риски:**
 
 - Supabase Dashboard привязан к исходному проекту
-- Миграции Railway.apply применяются к другому проекту
+- Миграции Railway применяются к другому проекту
 - Данные пользователей分散ены между двумя проектами
 
 **Что нельзя делать до резервного копирования:**
@@ -253,9 +317,9 @@ SELECT EXISTS (
 
 **Как подтвердить:**
 
-- `current_database()` содержит branch name (например, `postgres` или `branch-xxx`)
 - Hostname содержит `branch` или `preview` подстроку
 - В Supabase Dashboard видны database branches
+- `schema_migrations` может отличаться от main branch
 
 **Риски:**
 
@@ -277,7 +341,6 @@ SELECT EXISTS (
 
 - Hostname содержит `railway.internal`
 - `inet_server_addr()` возвращает RFC1918 IP (10.x, 172.16–31.x, 192.168.x)
-- `current_user` — `railway` или service name
 - Нет Supabase project ref в hostname/username
 
 **Риски:**
@@ -285,13 +348,11 @@ SELECT EXISTS (
 - Railway PG — это managed PostgreSQL, не Supabase
 - Supabase Dashboard не имеет к нему доступа
 - Репликация, backups, pooler — от Railway, не от Supabase
-- Если ожидается Supabase — это конфигурационная ошибка
 
 **Что нельзя делать до резервного копирования:**
 
 - Менять DATABASE_URL
 - Удалять Railway PostgreSQL service
-- Подключать Supabase Dashboard к Railway PG
 
 ---
 
@@ -301,7 +362,7 @@ SELECT EXISTS (
 
 - В Supabase Dashboard: Project Settings → Database → проект с ref `siquoydstcdbkxvcmbzu`
 - Если ref отличается — SQL Editor подключён к другому проекту
-- `current_database()` в SQL Editor не содержит `postgres` или содержит другой ref
+- `schema_migrations` отсутствует или содержит другой набор миграций
 
 **Риски:**
 
@@ -310,21 +371,21 @@ SELECT EXISTS (
 
 **Что нельзя делать:**
 
-- Ничего критического — проблема на стороне Dashboard, не на стороне Railway
+- Ничего критического — проблема на стороне Dashboard
 
 ---
 
-### E. Разные database name или pooler user
+### E. Разные pooler user при одной базе
 
 **Как подтвердить:**
 
-- Hostname одинаковый, но `current_database()` или `current_user` отличаются
-- Railway использует pooler user (`supabase_pooler`), SQL Editor — direct user (`postgres`)
-- Разные порты: pooler `6543` vs direct `5432`
+- Hostname одинаковый
+- `schema_migrations` и список filename совпадают
+- Отличаются только `current_user` или `inet_server_addr()` (pooler vs direct)
 
 **Риски:**
 
-- Pooler и direct могут указывать на одну БД, но с разными пользователями
+- Минимальные — это разные способы подключения к одной БД
 - Разные permissions могут маскировать разницу
 - RLS policies Supabase могут блокировать pooler-доступ
 
@@ -335,20 +396,20 @@ SELECT EXISTS (
 
 ---
 
-## 7. Безопасный план исправления
+## 10. Безопасный план исправления
 
 > **Не выполнять автоматически.** Каждый шаг требует ручного подтверждения.
 
 ### Шаг 1. Определить БД, где сейчас находятся production-данные
 
-- Выполнить запросы из раздела 3 и 4
-- Сравнить результаты по таблице из раздела 5
-- Определить, в какой из двух БД реальные данные (users_count > 0)
+- Выполнить запросы из разделов 5 и 6
+- Сравнить результаты по таблице из раздела 7
+- Определить категорию по дереву решений (раздел 8)
 
 ### Шаг 2. Зафиксировать количество записей
 
 ```sql
--- Выполнить в ОБЕИХ БД
+-- Выполнить в ОБЕИХ БД (только после проверки to_regclass)
 SELECT
   (SELECT count(*) FROM public.users)        AS users,
   (SELECT count(*) FROM public.profiles)     AS profiles,
@@ -368,13 +429,18 @@ SELECT
 |---------|-----------|----------|
 | A | Railway current | Оставить как есть, переключить SQL Editor |
 | B | Supabase current | Переключить Railway DATABASE_URL (после бэкапа!) |
-| C | Новая БД | Мигрировать данные (сложная операция) |
 
 ### Шаг 4. Сделать резервную копию
 
+**Предпочтительный вариант:** managed backup Supabase или Railway (Dashboard → Backups).
+
+Альтернатива — `pg_dump`:
+
 ```bash
-# Способ 1: Supabase Dashboard → Database → Backups
-# Способ 2: pg_dump (read-only, не影響 production)
+# pg_dump не изменяет данные, но создаёт нагрузку и файл,
+# содержащий production-данные.
+# Не коммитить, не отправлять в чат, хранить с контролем доступа.
+# Не включать реальный DATABASE_URL в документацию.
 pg_dump "$DATABASE_URL" -F c -f runroute_backup_$(date +%Y%m%d).dump
 ```
 
@@ -386,14 +452,14 @@ FROM public.schema_migrations
 ORDER BY filename;
 ```
 
-Убедиться, что все 6 миграций (001–006) присутствуют.
+Убедиться, что все 5 миграций (001–005) присутствуют.
 
 ### Шаг 6. Спланировать перенос данных
 
 Если данные распределены между двумя БД — составить план переноса:
 
 1. Определить, какие таблицы в какой БД
-2. Решить, куда переносить (в какую сторону)
+2. Решить, куда переносить
 3. Составить SQL-скрипты переноса (INSERT ... ON CONFLICT)
 4. Проверить foreign keys и целостность
 
@@ -407,7 +473,7 @@ ORDER BY filename;
 
 ### Шаг 8. Выполнить smoke tests
 
-См. раздел 8.
+См. раздел 11.
 
 ### Шаг 9. Подготовить rollback
 
@@ -418,50 +484,56 @@ ORDER BY filename;
 
 ---
 
-## 8. Smoke Checklist после переключения
+## 11. Smoke Checklist после переключения
+
+### Read-only проверки
 
 | Проверка | Ожидаемый результат | Статус |
 |----------|---------------------|--------|
 | `GET /health/live` | 200 | |
 | `GET /health/ready` | 200 (DB pool connected) | |
-| `POST /api/me` | 200 + user object | |
+| `GET /api/me` | 200 + user object | |
 | `GET /api/profile` | 200 + profile or empty | |
-| `PUT /api/profile` | 200 + updated profile | |
 | `GET /api/routes` | 200 + routes list | |
-| `POST /api/routes` | 200 + saved route | |
 | `GET /api/calendar/runs?from=...&to=...` | 200 + runs list | |
+| `GET /api/me/followers` | 200 + followers list | |
+| `GET /api/me/following` | 200 + following list | |
+| `GET /api/users/{user_id}/profile` | 200 + public profile | |
+
+### Write проверки (выполнять отдельно, не в рамках read-only audit)
+
+| Проверка | Ожидаемый результат | Статус |
+|----------|---------------------|--------|
+| `PUT /api/profile` | 200 + updated profile | |
+| `POST /api/routes` | 200 + saved route | |
 | `POST /api/calendar/runs` | 200 + created run | |
-| Follows endpoints | 200 | |
+| `POST /api/calendar/runs/{run_id}/cancel` | 200 + cancelled run | |
+| `POST /api/users/{user_id}/follow` | 200 + is_following: true | |
+| `DELETE /api/users/{user_id}/follow` | 200 + is_following: false | |
+
+### Общие проверки
+
+| Проверка | Ожидаемый результат | Статус |
+|----------|---------------------|--------|
 | Отсутствие 500 ошибок | No Internal Server Error | |
-| Миграции 001–006 | `schema_migrations` содержит 6 записей | |
+| Миграции 001–005 | `schema_migrations` содержит 5 записей | |
 | Существующие данные пользователя | users_count, profiles_count совпадают с шагом 2 | |
 
 ---
 
-## 9. Итоговый отчёт
-
-### Наиболее вероятный сценарий
-
-**Сценарий D: SQL Editor открыт в другом Supabase project.**
-
-Почему:
-- Railway логи показывают успешные миграции → `DATABASE_URL` работает и указывает на реальную БД
-- Supabase SQL Editor не видит `schema_migrations` → SQL Editor подключён к другой БД
-- Самый частый случай: пользователь открыл не тот проект в Supabase Dashboard
-
-Второй по вероятности — **Сценарий A** (Railway DATABASE_URL указывает на другой Supabase project) или **Сценарий E** (разные pooler/direct users).
+## 12. Итоговый отчёт
 
 ### Какие данные ещё нужны от пользователя
 
 1. **Hostname** из Railway `DATABASE_URL` (без username/password) — для определения project ref
 2. **Порт** из Railway `DATABASE_URL` — для определения pooler vs direct
-3. **Supabase project ref** в Dashboard — сравнить с `siquoydstcdbkxvcmbzu`
-4. **Результаты запросов** из разделов 3 и 4 — заполнить таблицу сравнения
+3. **Project ref** в Supabase Dashboard — сравнить с `siquoydstcdbkxvcmbzu`
+4. **Результаты запросов** из разделов 5 и 6 — заполнить таблицу сравнения
 
 ### Какие проверки безопасно выполнить сейчас
 
 - Анализ кода `config.py`, `migrate.py`, `database.py` — **выполнено**
-- Анализ миграций 001–006 — **выполнено**
+- Анализ миграций 001–005 — **выполнено**
 - Определение формата URL — **выполнено**
 - Read-only SQL запросы — **подготовлены**, ожидают выполнения пользователем
 
@@ -469,20 +541,20 @@ ORDER BY filename;
 
 - Railway variables (DATABASE_URL, SUPABASE_URL, BOT_TOKEN, SECRET_KEY)
 - Supabase project settings
-- Миграции (001–006) — не добавлять, не удалять, не изменять
+- Миграции (001–005) — не добавлять, не удалять, не изменять
 - `.env` файлы — не коммитить
 - Production URL приложения
 
 ### Base commit SHA
 
 ```
-2754e048d064fa7029c180e65f3d6bd99e83f97c
+690b5703d4ff26cba33523a198352b035e6d3c0a
 ```
 
 ### Commit SHA документации
 
 ```
-35cb55df983b8d81c22c41a406271982fdf1e4c2
+c41d04c66f7437b9bbdd6af0cd4e6159e032b8cf
 ```
 
 ### Compare URL
