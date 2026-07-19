@@ -1190,3 +1190,85 @@ describe('getOpenSavedRouteErrorMessage', () => {
             'must not leak host details');
     });
 });
+
+
+// --- Regression: saved route JSONB display fix ---
+
+describe('saved route JSONB regression', () => {
+    it('valid detail response opens via validateSavedRouteForDisplay + buildCurrentRouteFromApi', () => {
+        const apiRoute = {
+            id: 'route-abc',
+            name: 'Morning Run',
+            route_mode: 'auto',
+            distance_m: 5000,
+            points: [
+                { lat: 55.7558, lng: 37.6173 },
+                { lat: 55.7568, lng: 37.6183 },
+                { lat: 55.7578, lng: 37.6193 },
+            ],
+        };
+        const validated = validateSavedRouteForDisplay(apiRoute);
+        const result = buildCurrentRouteFromApi(validated, (pts, name) => '<gpx>' + name + '</gpx>');
+        assert.equal(result.source, 'saved');
+        assert.equal(result.saved_route_id, 'route-abc');
+        assert.equal(result.route_mode, 'auto');
+        assert.equal(result.distance_km, 5);
+        assert.equal(result.points.length, 3);
+        assert.ok(result.gpx.includes('Morning Run'));
+    });
+
+    it('string-valued points field is rejected by validateSavedRouteForDisplay', () => {
+        const route = {
+            id: 'r1', name: 'X', route_mode: 'auto', distance_m: 100,
+            points: '[{"lat":55.7,"lng":37.6}]',
+        };
+        assert.throws(
+            () => validateSavedRouteForDisplay(route),
+            /Маршрут содержит некорректные данные/
+        );
+    });
+
+    it('null points field is rejected', () => {
+        const route = {
+            id: 'r1', name: 'X', route_mode: 'auto', distance_m: 100,
+            points: null,
+        };
+        assert.throws(
+            () => validateSavedRouteForDisplay(route),
+            /Маршрут содержит некорректные данные/
+        );
+    });
+
+    it('existing lat/lng validation still rejects NaN', () => {
+        const route = {
+            id: 'r1', name: 'X', route_mode: 'auto', distance_m: 100,
+            points: [{ lat: NaN, lng: 37.6 }, { lat: 55.8, lng: 37.7 }],
+        };
+        assert.throws(
+            () => validateSavedRouteForDisplay(route),
+            /Маршрут содержит некорректные данные/
+        );
+    });
+
+    it('existing min-points validation still rejects 1 point', () => {
+        const route = {
+            id: 'r1', name: 'X', route_mode: 'auto', distance_m: 100,
+            points: [{ lat: 55.7, lng: 37.6 }],
+        };
+        assert.throws(
+            () => validateSavedRouteForDisplay(route),
+            /Маршрут содержит некорректные данные/
+        );
+    });
+
+    it('existing route_mode validation still rejects invalid mode', () => {
+        const route = {
+            id: 'r1', name: 'X', route_mode: 'swim', distance_m: 100,
+            points: [{ lat: 55.7, lng: 37.6 }, { lat: 55.8, lng: 37.7 }],
+        };
+        assert.throws(
+            () => validateSavedRouteForDisplay(route),
+            /Маршрут содержит некорректные данные/
+        );
+    });
+});

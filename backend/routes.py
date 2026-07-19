@@ -8,6 +8,20 @@ from .database import get_db_pool
 logger = logging.getLogger(__name__)
 
 
+def _normalize_points(points):
+    if isinstance(points, list):
+        return points
+    if isinstance(points, str):
+        try:
+            parsed = json.loads(points)
+        except (json.JSONDecodeError, ValueError):
+            raise ValueError("points must be a JSON array")
+        if not isinstance(parsed, list):
+            raise ValueError("points must be a JSON array")
+        return parsed
+    raise ValueError("points must be a list or JSON string")
+
+
 async def create_saved_route(
     user_id: UUID,
     name: str,
@@ -29,7 +43,9 @@ async def create_saved_route(
             distance_m,
             json.dumps(points),
         )
-    return dict(row)
+    result = dict(row)
+    result["points"] = _normalize_points(result["points"])
+    return result
 
 
 async def list_saved_routes(user_id: UUID) -> list[dict]:
@@ -60,7 +76,11 @@ async def get_saved_route(user_id: UUID, route_id: UUID) -> Optional[dict]:
             route_id,
             user_id,
         )
-    return dict(row) if row else None
+    if not row:
+        return None
+    result = dict(row)
+    result["points"] = _normalize_points(result["points"])
+    return result
 
 
 async def rename_saved_route(user_id: UUID, route_id: UUID, name: str) -> Optional[dict]:
