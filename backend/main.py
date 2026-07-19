@@ -24,6 +24,7 @@ from .calendar import (
 from .lobbies import (
     create_lobby, get_lobby_with_organizer, list_lobbies,
     update_lobby, cancel_lobby, _decode_cursor,
+    join_lobby, leave_lobby, list_lobby_participants,
 )
 from .models import RunLobbyCreate, RunLobbyUpdate
 from .follows import (
@@ -649,7 +650,97 @@ async def cancel_lobby_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@app.get("/api/search")
+@app.post("/api/lobbies/{lobby_id}/join")
+async def join_lobby_endpoint(
+    lobby_id: UUID,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        result = await join_lobby(user_id=user["id"], lobby_id=lobby_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Lobby not found")
+        error = result.get("error") if isinstance(result, dict) else None
+        if error == "lobby_not_found":
+            raise HTTPException(status_code=404, detail="Lobby not found")
+        if error == "lobby_cancelled":
+            raise HTTPException(status_code=409, detail="Lobby is cancelled")
+        if error == "lobby_completed":
+            raise HTTPException(status_code=409, detail="Lobby is completed")
+        if error == "already_joined":
+            raise HTTPException(status_code=409, detail="Already joined this lobby")
+        if error == "lobby_full":
+            raise HTTPException(status_code=409, detail="Lobby is full")
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to join lobby error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/api/lobbies/{lobby_id}/leave")
+async def leave_lobby_endpoint(
+    lobby_id: UUID,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        user = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        result = await leave_lobby(user_id=user["id"], lobby_id=lobby_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Lobby not found")
+        error = result.get("error") if isinstance(result, dict) else None
+        if error == "lobby_not_found":
+            raise HTTPException(status_code=404, detail="Lobby not found")
+        if error == "not_a_participant":
+            raise HTTPException(status_code=409, detail="Not a participant of this lobby")
+        if error == "organizer_cannot_leave":
+            raise HTTPException(status_code=409, detail="Organizer cannot leave the lobby")
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to leave lobby error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/lobbies/{lobby_id}/participants")
+async def list_participants_endpoint(
+    lobby_id: UUID,
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        result = await list_lobby_participants(lobby_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Lobby not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to list participants error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Internal server error")
 async def search_address(q: str = Query(..., description="Address or city name")):
     try:
         async with httpx.AsyncClient() as client:

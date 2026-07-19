@@ -417,3 +417,138 @@ async def cancel_lobby(lobby_id: UUID, organizer_id: UUID) -> Optional[dict]:
                 lobby_id,
             )
             return dict(row)
+
+
+async def join_lobby(user_id: UUID, lobby_id: UUID) -> Optional[dict]:
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            lobby = await conn.fetchrow(
+                "SELECT id, capacity, status FROM public.run_lobbies WHERE id = $1 FOR UPDATE",
+                lobby_id,
+            )
+            if lobby is None:
+                return {"error": "lobby_not_found"}
+
+            if lobby["status"] == "cancelled":
+                return {"error": "lobby_cancelled"}
+
+            if lobby["status"] == "completed":
+                return {"error": "lobby_completed"}
+
+            existing = await conn.fetchrow(
+                "SELECT role, status FROM public.run_lobby_participants WHERE lobby_id = $1 AND user_id = $2",
+                lobby_id, user_id,
+            )
+
+            if existing is not None and existing["status"] == "joined":
+                return {"error": "already_joined"}
+
+            participant_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM public.run_lobby_participants WHERE lobby_id = $1 AND status = 'joined'",
+                lobby_id,
+            )
+
+            if participant_count >= lobby["capacity"]:
+                return {"error": "lobby_full"}
+
+            if existing is not None:
+                await conn.execute(
+                    "UPDATE public.run_lobby_participants SET status = 'joined', updated_at = now() WHERE lobby_id = $1 AND user_id = $2",
+                    lobby_id, user_id,
+                )
+            else:
+                await conn.execute(
+                    "INSERT INTO public.run_lobby_participants (lobby_id, user_id, role, status) VALUES ($1, $2, 'participant', 'joined')",
+                    lobby_id, user_id,
+                )
+
+            new_count = participant_count + 1
+            if new_count >= lobby["capacity"]:
+                await conn.execute(
+                    "UPDATE public.run_lobbies SET status = 'full' WHERE id = $1 AND status = 'open'",
+                    lobby_id,
+                )
+
+            return {"joined": True, "participant_count": new_count}
+
+
+async def leave_lobby(user_id: UUID, lobby_id: UUID) -> Optional[dict]:
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            lobby = await conn.fetchrow(
+                "SELECT id, organizer_id, status FROM public.run_lobbies WHERE id = $1 FOR UPDATE",
+                lobby_id,
+            )
+            if lobby is None:
+                return {"error": "lobby_not_found"}
+
+            existing = await conn.fetchrow(
+                "SELECT role, status FROM public.run_lobby_participants WHERE lobby_id = $1 AND user_id = $2",
+                lobby_id, user_id,
+            )
+
+            if existing is None or existing["status"] != "joined":
+                return {"error": "not_a_participant"}
+
+            if existing["role"] == "organizer":
+                return {"error": "organizer_cannot_leave"}
+
+            await conn.execute(
+                "UPDATE public.run_lobby_participants SET status = 'left', updated_at = now() WHERE lobby_id = $1 AND user_id = $2",
+                lobby_id, user_id,
+            )
+
+            if lobby["status"] == "full":
+                await conn.execute(
+                    "UPDATE public.run_lobbies SET status = 'open' WHERE id = $1",
+                    lobby_id,
+                )
+
+            participant_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM public.run_lobby_participants WHERE lobby_id = $1 AND status = 'joined'",
+                lobby_id,
+            )
+
+            return {"left": True, "participant_count": participant_count}
+
+
+async def list_lobby_participants(lobby_id: UUID) -> Optional[dict]:
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        lobby = await conn.fetchval(
+            "SELECT id FROM public.run_lobbies WHERE id = $1",
+            lobby_id,
+        )
+        if lobby is None:
+            return None
+
+        rows = await conn.fetch(
+            """
+            SELECT lp.user_id, lp.role, lp.status, lp.joined_at,
+                   COALESCE(p.display_name, '') AS display_name,
+                   p.avatar_url, p.city, p.club_name
+            FROM public.run_lobby_participants lp
+            LEFT JOIN public.users u ON u.id = lp.user_id AND u.is_active = true
+            LEFT JOIN public.profiles p ON p.user_id = lp.user_id
+            WHERE lp.lobby_id = $1 AND lp.status = 'joined'
+            ORDER BY lp.joined_at ASC
+            """,
+            lobby_id,
+        )
+
+        participants = []
+        for r in rows:
+            d = dict(r)
+            participants.append({
+                "user_id": d["user_id"],
+                "role": d["role"],
+                "display_name": d["display_name"] or None,
+                "avatar_url": d["avatar_url"],
+                "city": d["city"],
+                "club_name": d["club_name"],
+                "joined_at": d["joined_at"],
+            })
+
+        return {"participants": participants}
