@@ -1853,3 +1853,276 @@ body {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
 }
+
+/* === Lobby Panel === */
+
+.lobby-panel {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--bg);
+    z-index: 9000;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.lobby-panel.hidden { display: none; }
+
+.lobby-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--glass-border);
+    flex-shrink: 0;
+}
+
+.lobby-panel-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.lobby-panel-subtitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 16px;
+}
+
+.lobby-close-btn {
+    width: 44px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.lobby-close-btn svg { width: 20px; height: 20px; }
+
+.lobby-back-btn {
+    display: flex; align-items: center; gap: 4px;
+    background: none; border: none;
+    color: var(--accent); font-size: 14px;
+    cursor: pointer; padding: 4px 0;
+    margin-bottom: 12px;
+}
+
+.lobby-back-btn svg { width: 16px; height: 16px; }
+
+#lobby-list-view, #lobby-detail-view, #lobby-create-view {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+/* Lobby Filters */
+
+.lobby-filters {
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-bottom: 16px;
+}
+
+.lobby-filters .profile-field { margin-bottom: 8px; }
+.lobby-filters .profile-field:last-of-type { margin-bottom: 0; }
+
+.lobby-filter-actions {
+    display: flex; gap: 8px; margin-top: 12px;
+}
+
+.lobby-filter-actions .modal-btn { flex: 1; }
+
+/* Lobby Cards */
+
+.lobby-card {
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    touch-action: manipulation;
+}
+
+.lobby-card:active { border-color: var(--primary); }
+
+.lobby-card-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    margin-bottom: 8px; gap: 8px;
+}
+
+.lobby-card-title {
+    font-size: 16px; font-weight: 600; color: var(--text);
+    word-break: break-word; flex: 1;
+}
+
+.lobby-card-type {
+    font-size: 12px; color: var(--accent);
+    background: rgba(0, 212, 255, 0.1);
+    padding: 2px 8px; border-radius: 10px;
+    white-space: nowrap; flex-shrink: 0;
+}
+
+.lobby-card-meta {
+    display: flex; flex-wrap: wrap; gap: 4px 12px;
+    font-size: 13px; color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.lobby-card-details {
+    display: flex; flex-wrap: wrap; gap: 4px 12px;
+    font-size: 12px; color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.lobby-card-footer {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 13px; color: var(--text-secondary);
+}
+
+.lobby-card-org {
+    display: flex; align-items: center; gap: 6px;
+}
+
+.lobby-card-avatar {
+    width: 20px; height: 20px; border-radius: 50%;
+    object-fit: cover;
+}
+
+.lobby-card-avatar-empty {
+    background: var(--glass); border: 1px solid var(--glass-border);
+}
+
+/* Lobby Detail */
+
+.lobby-detail-name {
+    font-size: 20px; font-weight: 700; color: var(--text);
+    margin-bottom: 4px;
+}
+
+.lobby-detail-type {
+    font-size: 14px; color: var(--accent); margin-bottom: 12px;
+}
+
+.lobby-detail-section {
+    margin-bottom: 16px;
+}
+
+.lobby-detail-label {
+    font-size: 12px; color: var(--text-secondary); text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 4px;
+}
+
+.lobby-detail-value {
+    font-size: 15px; color: var(--text);
+    word-break: break-word;
+}
+
+.lobby-detail-desc {
+    font-size: 14px; color: var(--text-secondary);
+    white-space: pre-wrap; word-break: break-word;
+}
+
+.lobby-detail-org {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px; background: var(--surface);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xs);
+}
+
+.lobby-detail-org-avatar {
+    width: 36px; height: 36px; border-radius: 50%; object-fit: cover;
+}
+
+.lobby-detail-org-avatar-empty {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--glass); border: 1px solid var(--glass-border);
+}
+
+.lobby-detail-org-name {
+    font-size: 15px; font-weight: 600; color: var(--text);
+}
+
+.lobby-detail-org-meta {
+    font-size: 12px; color: var(--text-secondary);
+}
+
+/* Participants */
+
+.lobby-participants-title {
+    font-size: 14px; font-weight: 600; color: var(--text-secondary);
+    margin: 16px 0 8px;
+}
+
+.lobby-participant {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.lobby-participant:last-child { border-bottom: none; }
+
+.lobby-participant-avatar {
+    width: 28px; height: 28px; border-radius: 50%; object-fit: cover;
+}
+
+.lobby-participant-avatar-empty {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--glass); border: 1px solid var(--glass-border);
+}
+
+.lobby-participant-name {
+    font-size: 14px; color: var(--text);
+}
+
+.lobby-participant-role {
+    font-size: 11px; color: var(--text-secondary);
+    margin-left: auto;
+}
+
+/* Lobby Action Buttons */
+
+.lobby-actions {
+    display: flex; gap: 8px; margin-top: 16px;
+}
+
+.lobby-actions .modal-btn { flex: 1; }
+
+.lobby-actions .btn-cancel-lobby {
+    background: var(--danger); color: #fff; border: none;
+}
+
+/* Lobby Empty & Loading */
+
+.lobby-empty {
+    text-align: center; padding: 40px 16px;
+    color: var(--text-secondary); font-size: 15px;
+}
+
+/* Lobby Pace Row */
+
+.lobby-pace-row {
+    display: flex; gap: 12px;
+}
+
+/* Lobby Point Status */
+
+.lobby-point-status {
+    font-size: 14px; padding: 8px 12px;
+    background: var(--surface); border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xs);
+    margin-bottom: 8px; color: var(--text-secondary);
+}
+
+.lobby-point-status.success { color: var(--primary); border-color: var(--primary); }
+.lobby-point-status.error { color: var(--danger); }
+
+.lobby-point-actions {
+    display: flex; gap: 8px; margin-bottom: 4px;
+}
