@@ -344,7 +344,7 @@ async def test_get_lobby_not_found():
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=None)):
+         patch("backend.main.get_lobby_with_organizer_and_viewer", new_callable=lambda: AsyncMock(return_value=None)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             assert (await c.get("/api/lobbies/00000000-0000-0000-0000-000000000099",
                                 headers={"X-Telegram-Init-Data": init_data})).status_code == 404
@@ -356,9 +356,13 @@ async def test_get_lobby_success():
     init_data = _make_init_data()
     lobby_with_org = _mock_lobby()
     lobby_with_org["organizer"] = _mock_organizer()
+    lobby_with_org["viewer_role"] = None
+    lobby_with_org["viewer_status"] = None
+    lobby_with_org["can_join"] = True
+    lobby_with_org["can_leave"] = False
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=lobby_with_org)):
+         patch("backend.main.get_lobby_with_organizer_and_viewer", new_callable=lambda: AsyncMock(return_value=lobby_with_org)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
                                headers={"X-Telegram-Init-Data": init_data})
@@ -374,7 +378,7 @@ async def test_get_lobby_passes_lobby_id():
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=None)) as mg:
+         patch("backend.main.get_lobby_with_organizer_and_viewer", new_callable=lambda: AsyncMock(return_value=None)) as mg:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             await c.get("/api/lobbies/00000000-0000-0000-0000-000000000099",
                         headers={"X-Telegram-Init-Data": init_data})
@@ -585,7 +589,7 @@ async def test_get_lobby_no_telegram_pii():
     lobby_with_org["organizer"] = _mock_organizer()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=lobby_with_org)):
+         patch("backend.main.get_lobby_with_organizer_and_viewer", new_callable=lambda: AsyncMock(return_value=lobby_with_org)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             org = (await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
                                headers={"X-Telegram-Init-Data": init_data})).json().get("organizer", {})
@@ -789,7 +793,7 @@ async def test_get_lobby_inactive_organizer_404():
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=None)):
+         patch("backend.main.get_lobby_with_organizer_and_viewer", new_callable=lambda: AsyncMock(return_value=None)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             assert (await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
                                 headers={"X-Telegram-Init-Data": init_data})).status_code == 404
@@ -843,7 +847,7 @@ async def test_get_lobby_organizer_missing_404():
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.get_lobby_with_organizer", new_callable=lambda: AsyncMock(return_value=None)):
+         patch("backend.main.get_lobby_with_organizer_and_viewer", new_callable=lambda: AsyncMock(return_value=None)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             assert (await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
                                 headers={"X-Telegram-Init-Data": init_data})).status_code == 404
@@ -1160,27 +1164,70 @@ async def test_list_lobbies_invalid_base64_chars_returns_400():
 
 # --- join_lobby service tests ---
 
+def _future_starts_at():
+    from datetime import datetime, timedelta, timezone
+    return datetime.now(timezone.utc) + timedelta(days=30)
+
+
+def _past_starts_at():
+    from datetime import datetime, timedelta, timezone
+    return datetime.now(timezone.utc) - timedelta(days=1)
+
+
+def _make_lobby_row(**overrides):
+    from uuid import UUID
+    row = {
+        "id": UUID("11111111-1111-1111-1111-111111111111"),
+        "organizer_id": UUID("00000000-0000-0000-0000-000000000001"),
+        "capacity": 10, "status": "open",
+        "starts_at": _future_starts_at(),
+    }
+    row.update(overrides)
+    return row
+
+
+def _make_conn_join(lobby_row=None, existing_participant=None, count_joined=0,
+                    org_active=True, org_public=True, user_active=True, user_public=True):
+    class _Conn:
+        def __init__(self):
+            self._execute_calls = []
+            self._fetchval_calls = 0
+
+        async def fetchrow(self, sql, *args):
+            if "FOR UPDATE" in sql and "run_lobbies" in sql:
+                return lobby_row or _make_lobby_row()
+            if "run_lobby_participants" in sql:
+                return existing_participant
+            return None
+
+        async def fetchval(self, sql, *args):
+            self._fetchval_calls += 1
+            if "COUNT(*)" in sql:
+                return count_joined
+            if self._fetchval_calls == 1:
+                return org_active
+            if self._fetchval_calls == 2:
+                return org_public
+            if self._fetchval_calls == 3:
+                return user_active
+            if self._fetchval_calls == 4:
+                return user_public
+            return None
+
+        async def execute(self, sql, *args):
+            self._execute_calls.append(sql)
+            return None
+
+        def transaction(self):
+            return _FakeAsyncCtx(self)
+    return _Conn()
+
+
 @pytest.mark.asyncio
 async def test_join_lobby_success():
     from backend.lobbies import join_lobby
     from uuid import UUID
-    lobby_row = {"id": UUID("11111111-1111-1111-1111-111111111111"), "capacity": 10, "status": "open"}
-    conn = _FakeConn(fetchrow_return=lobby_row)
-    conn._fetchval_return = 0
-    conn._execute_count = 0
-
-    async def fake_execute(sql, *args):
-        conn._execute_count += 1
-        return None
-
-    async def fake_fetchval(sql, *args):
-        if "COUNT(*)" in sql:
-            return 0
-        return None
-
-    conn.execute = fake_execute
-    conn.fetchval = fake_fetchval
-
+    conn = _make_conn_join(count_joined=0)
     pool = _FakePool(conn)
     with patch("backend.lobbies.get_db_pool", return_value=pool):
         result = await join_lobby(
@@ -1209,8 +1256,8 @@ async def test_join_lobby_not_found():
 async def test_join_lobby_cancelled():
     from backend.lobbies import join_lobby
     from uuid import UUID
-    lobby_row = {"id": UUID("11111111-1111-1111-1111-111111111111"), "capacity": 10, "status": "cancelled"}
-    conn = _FakeConn(fetchrow_return=lobby_row)
+    lobby_row = _make_lobby_row(status="cancelled")
+    conn = _make_conn_join(lobby_row=lobby_row)
     pool = _FakePool(conn)
     with patch("backend.lobbies.get_db_pool", return_value=pool):
         result = await join_lobby(
@@ -1224,8 +1271,8 @@ async def test_join_lobby_cancelled():
 async def test_join_lobby_completed():
     from backend.lobbies import join_lobby
     from uuid import UUID
-    lobby_row = {"id": UUID("11111111-1111-1111-1111-111111111111"), "capacity": 10, "status": "completed"}
-    conn = _FakeConn(fetchrow_return=lobby_row)
+    lobby_row = _make_lobby_row(status="completed")
+    conn = _make_conn_join(lobby_row=lobby_row)
     pool = _FakePool(conn)
     with patch("backend.lobbies.get_db_pool", return_value=pool):
         result = await join_lobby(
@@ -1236,36 +1283,26 @@ async def test_join_lobby_completed():
 
 
 @pytest.mark.asyncio
+async def test_join_lobby_past():
+    from backend.lobbies import join_lobby
+    from uuid import UUID
+    lobby_row = _make_lobby_row(starts_at=_past_starts_at())
+    conn = _make_conn_join(lobby_row=lobby_row)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await join_lobby(
+            UUID("00000000-0000-0000-0000-000000000002"),
+            UUID("11111111-1111-1111-1111-111111111111"),
+        )
+    assert result == {"error": "lobby_past"}
+
+
+@pytest.mark.asyncio
 async def test_join_lobby_full():
     from backend.lobbies import join_lobby
     from uuid import UUID
-    lobby_row = {"id": UUID("11111111-1111-1111-1111-111111111111"), "capacity": 2, "status": "open"}
-
-    class _ConnFull:
-        def __init__(self):
-            self._calls = []
-            self._fetchrow_call = 0
-
-        async def fetchrow(self, sql, *args):
-            if "capacity" in sql and "FOR UPDATE" in sql:
-                return lobby_row
-            if "run_lobby_participants" in sql:
-                return None
-            return None
-
-        async def fetchval(self, sql, *args):
-            if "COUNT(*)" in sql:
-                return 2
-            return None
-
-        async def execute(self, sql, *args):
-            self._calls.append(sql)
-            return None
-
-        def transaction(self):
-            return _FakeAsyncCtx(self)
-
-    conn = _ConnFull()
+    lobby_row = _make_lobby_row(capacity=2)
+    conn = _make_conn_join(lobby_row=lobby_row, count_joined=2)
     pool = _FakePool(conn)
     with patch("backend.lobbies.get_db_pool", return_value=pool):
         result = await join_lobby(
@@ -1276,57 +1313,113 @@ async def test_join_lobby_full():
 
 
 @pytest.mark.asyncio
-async def test_join_lobby_already_joined():
+async def test_join_lobby_already_joined_returns_200():
     from backend.lobbies import join_lobby
     from uuid import UUID
-    lobby_row = {"id": UUID("11111111-1111-1111-1111-111111111111"), "capacity": 10, "status": "open"}
     existing = {"role": "participant", "status": "joined"}
-
-    class _ConnAlready:
-        async def fetchrow(self, sql, *args):
-            if "capacity" in sql:
-                return lobby_row
-            return existing
-
-        async def fetchval(self, sql, *args):
-            return 1
-
-        async def execute(self, sql, *args):
-            return None
-
-        def transaction(self):
-            return _FakeAsyncCtx(self)
-
-    conn = _ConnAlready()
+    conn = _make_conn_join(existing_participant=existing, count_joined=3)
     pool = _FakePool(conn)
     with patch("backend.lobbies.get_db_pool", return_value=pool):
         result = await join_lobby(
             UUID("00000000-0000-0000-0000-000000000002"),
             UUID("11111111-1111-1111-1111-111111111111"),
         )
-    assert result == {"error": "already_joined"}
+    assert result["joined"] is True
+    assert result["already_joined"] is True
+    assert result["participant_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_join_lobby_organizer_repeated_join():
+    from backend.lobbies import join_lobby
+    from uuid import UUID
+    existing = {"role": "organizer", "status": "joined"}
+    conn = _make_conn_join(existing_participant=existing, count_joined=1)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await join_lobby(
+            UUID("00000000-0000-0000-0000-000000000001"),
+            UUID("11111111-1111-1111-1111-111111111111"),
+        )
+    assert result["joined"] is True
+    assert result["already_joined"] is True
+
+
+@pytest.mark.asyncio
+async def test_join_lobby_removed():
+    from backend.lobbies import join_lobby
+    from uuid import UUID
+    existing = {"role": "participant", "status": "removed"}
+    conn = _make_conn_join(existing_participant=existing)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await join_lobby(
+            UUID("00000000-0000-0000-0000-000000000002"),
+            UUID("11111111-1111-1111-1111-111111111111"),
+        )
+    assert result == {"error": "participant_removed"}
+
+
+@pytest.mark.asyncio
+async def test_join_lobby_left_rejoin():
+    from backend.lobbies import join_lobby
+    from uuid import UUID
+    existing = {"role": "participant", "status": "left"}
+    conn = _make_conn_join(existing_participant=existing, count_joined=1)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await join_lobby(
+            UUID("00000000-0000-0000-0000-000000000002"),
+            UUID("11111111-1111-1111-1111-111111111111"),
+        )
+    assert result["joined"] is True
+    assert result["already_joined"] is False
+
+
+@pytest.mark.asyncio
+async def test_join_lobby_private_profile():
+    from backend.lobbies import join_lobby
+    from uuid import UUID
+    conn = _make_conn_join(user_public=False)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await join_lobby(
+            UUID("00000000-0000-0000-0000-000000000002"),
+            UUID("11111111-1111-1111-1111-111111111111"),
+        )
+    assert result == {"error": "private_profile"}
+
+
+@pytest.mark.asyncio
+async def test_join_lobby_inactive_organizer():
+    from backend.lobbies import join_lobby
+    from uuid import UUID
+    conn = _make_conn_join(org_active=False)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await join_lobby(
+            UUID("00000000-0000-0000-0000-000000000002"),
+            UUID("11111111-1111-1111-1111-111111111111"),
+        )
+    assert result == {"error": "lobby_not_found"}
 
 
 # --- leave_lobby service tests ---
 
-@pytest.mark.asyncio
-async def test_leave_lobby_success():
-    from backend.lobbies import leave_lobby
-    from uuid import UUID
-    lobby_row = {"id": UUID("11111111-1111-1111-1111-111111111111"), "organizer_id": UUID("00000000-0000-0000-0000-000000000001"), "status": "open"}
-    existing = {"role": "participant", "status": "joined"}
-
-    class _ConnLeave:
+def _make_conn_leave(lobby_row=None, existing_participant=None, count_joined=0):
+    class _Conn:
         def __init__(self):
             self._execute_calls = []
 
         async def fetchrow(self, sql, *args):
-            if "run_lobbies" in sql:
-                return lobby_row
-            return existing
+            if "FOR UPDATE" in sql and "run_lobbies" in sql:
+                return lobby_row or _make_lobby_row()
+            if "run_lobby_participants" in sql:
+                return existing_participant
+            return None
 
         async def fetchval(self, sql, *args):
-            return 0
+            return count_joined
 
         async def execute(self, sql, *args):
             self._execute_calls.append(sql)
@@ -1334,8 +1427,15 @@ async def test_leave_lobby_success():
 
         def transaction(self):
             return _FakeAsyncCtx(self)
+    return _Conn()
 
-    conn = _ConnLeave()
+
+@pytest.mark.asyncio
+async def test_leave_lobby_success():
+    from backend.lobbies import leave_lobby
+    from uuid import UUID
+    existing = {"role": "participant", "status": "joined"}
+    conn = _make_conn_leave(existing_participant=existing, count_joined=0)
     pool = _FakePool(conn)
     with patch("backend.lobbies.get_db_pool", return_value=pool):
         result = await leave_lobby(
@@ -1343,6 +1443,7 @@ async def test_leave_lobby_success():
             UUID("11111111-1111-1111-1111-111111111111"),
         )
     assert result["left"] is True
+    assert result["already_left"] is False
     assert result["participant_count"] == 0
 
 
@@ -1364,24 +1465,7 @@ async def test_leave_lobby_not_found():
 async def test_leave_lobby_not_a_participant():
     from backend.lobbies import leave_lobby
     from uuid import UUID
-    lobby_row = {"id": UUID("11111111-1111-1111-1111-111111111111"), "organizer_id": UUID("00000000-0000-0000-0000-000000000001"), "status": "open"}
-
-    class _ConnNotPart:
-        async def fetchrow(self, sql, *args):
-            if "run_lobbies" in sql:
-                return lobby_row
-            return None
-
-        async def fetchval(self, sql, *args):
-            return 0
-
-        async def execute(self, sql, *args):
-            return None
-
-        def transaction(self):
-            return _FakeAsyncCtx(self)
-
-    conn = _ConnNotPart()
+    conn = _make_conn_leave(existing_participant=None)
     pool = _FakePool(conn)
     with patch("backend.lobbies.get_db_pool", return_value=pool):
         result = await leave_lobby(
@@ -1395,25 +1479,8 @@ async def test_leave_lobby_not_a_participant():
 async def test_leave_lobby_organizer_cannot_leave():
     from backend.lobbies import leave_lobby
     from uuid import UUID
-    lobby_row = {"id": UUID("11111111-1111-1111-1111-111111111111"), "organizer_id": UUID("00000000-0000-0000-0000-000000000001"), "status": "open"}
     existing = {"role": "organizer", "status": "joined"}
-
-    class _ConnOrg:
-        async def fetchrow(self, sql, *args):
-            if "run_lobbies" in sql:
-                return lobby_row
-            return existing
-
-        async def fetchval(self, sql, *args):
-            return 0
-
-        async def execute(self, sql, *args):
-            return None
-
-        def transaction(self):
-            return _FakeAsyncCtx(self)
-
-    conn = _ConnOrg()
+    conn = _make_conn_leave(existing_participant=existing)
     pool = _FakePool(conn)
     with patch("backend.lobbies.get_db_pool", return_value=pool):
         result = await leave_lobby(
@@ -1424,32 +1491,73 @@ async def test_leave_lobby_organizer_cannot_leave():
 
 
 @pytest.mark.asyncio
+async def test_leave_lobby_removed():
+    from backend.lobbies import leave_lobby
+    from uuid import UUID
+    existing = {"role": "participant", "status": "removed"}
+    conn = _make_conn_leave(existing_participant=existing)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await leave_lobby(
+            UUID("00000000-0000-0000-0000-000000000002"),
+            UUID("11111111-1111-1111-1111-111111111111"),
+        )
+    assert result == {"error": "participant_removed"}
+
+
+@pytest.mark.asyncio
+async def test_leave_lobby_already_left():
+    from backend.lobbies import leave_lobby
+    from uuid import UUID
+    existing = {"role": "participant", "status": "left"}
+    conn = _make_conn_leave(existing_participant=existing, count_joined=0)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await leave_lobby(
+            UUID("00000000-0000-0000-0000-000000000002"),
+            UUID("11111111-1111-1111-1111-111111111111"),
+        )
+    assert result["left"] is True
+    assert result["already_left"] is True
+
+
+@pytest.mark.asyncio
+async def test_leave_lobby_cancelled():
+    from backend.lobbies import leave_lobby
+    from uuid import UUID
+    lobby_row = _make_lobby_row(status="cancelled")
+    conn = _make_conn_leave(lobby_row=lobby_row)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await leave_lobby(
+            UUID("00000000-0000-0000-0000-000000000002"),
+            UUID("11111111-1111-1111-1111-111111111111"),
+        )
+    assert result == {"error": "lobby_cancelled"}
+
+
+@pytest.mark.asyncio
+async def test_leave_lobby_completed():
+    from backend.lobbies import leave_lobby
+    from uuid import UUID
+    lobby_row = _make_lobby_row(status="completed")
+    conn = _make_conn_leave(lobby_row=lobby_row)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await leave_lobby(
+            UUID("00000000-0000-0000-0000-000000000002"),
+            UUID("11111111-1111-1111-1111-111111111111"),
+        )
+    assert result == {"error": "lobby_completed"}
+
+
+@pytest.mark.asyncio
 async def test_leave_lobby_reopens_full():
     from backend.lobbies import leave_lobby
     from uuid import UUID
-    lobby_row = {"id": UUID("11111111-1111-1111-1111-111111111111"), "organizer_id": UUID("00000000-0000-0000-0000-000000000001"), "status": "full"}
+    lobby_row = _make_lobby_row(status="full")
     existing = {"role": "participant", "status": "joined"}
-
-    class _ConnReopen:
-        def __init__(self):
-            self._execute_calls = []
-
-        async def fetchrow(self, sql, *args):
-            if "run_lobbies" in sql:
-                return lobby_row
-            return existing
-
-        async def fetchval(self, sql, *args):
-            return 1
-
-        async def execute(self, sql, *args):
-            self._execute_calls.append(sql)
-            return None
-
-        def transaction(self):
-            return _FakeAsyncCtx(self)
-
-    conn = _ConnReopen()
+    conn = _make_conn_leave(lobby_row=lobby_row, existing_participant=existing, count_joined=1)
     pool = _FakePool(conn)
     with patch("backend.lobbies.get_db_pool", return_value=pool):
         result = await leave_lobby(
@@ -1460,22 +1568,39 @@ async def test_leave_lobby_reopens_full():
     assert any("status = 'open'" in s for s in conn._execute_calls)
 
 
+@pytest.mark.asyncio
+async def test_leave_lobby_not_full_no_reopen():
+    from backend.lobbies import leave_lobby
+    from uuid import UUID
+    lobby_row = _make_lobby_row(status="open")
+    existing = {"role": "participant", "status": "joined"}
+    conn = _make_conn_leave(lobby_row=lobby_row, existing_participant=existing, count_joined=1)
+    pool = _FakePool(conn)
+    with patch("backend.lobbies.get_db_pool", return_value=pool):
+        result = await leave_lobby(
+            UUID("00000000-0000-0000-0000-000000000002"),
+            UUID("11111111-1111-1111-1111-111111111111"),
+        )
+    assert result["left"] is True
+    assert not any("status = 'open'" in s for s in conn._execute_calls)
+
+
 # --- list_lobby_participants service tests ---
 
 @pytest.mark.asyncio
 async def test_list_participants_success():
     from backend.lobbies import list_lobby_participants
     from uuid import UUID
+    lobby_row = {"id": UUID("11111111-1111-1111-1111-111111111111"), "organizer_id": UUID("00000000-0000-0000-0000-000000000001")}
     participant_row = {
         "user_id": UUID("00000000-0000-0000-0000-000000000001"),
-        "role": "organizer", "status": "joined",
-        "joined_at": "2027-01-01T00:00:00Z",
+        "role": "organizer", "joined_at": "2027-01-01T00:00:00Z",
         "display_name": "Test", "avatar_url": None, "city": "Moscow", "club_name": None,
     }
 
     class _ConnParticipants:
-        async def fetchval(self, sql, *args):
-            return UUID("11111111-1111-1111-1111-111111111111")
+        async def fetchrow(self, sql, *args):
+            return lobby_row
 
         async def fetch(self, sql, *args):
             return [participant_row]
@@ -1488,6 +1613,7 @@ async def test_list_participants_success():
     assert len(result["participants"]) == 1
     assert result["participants"][0]["role"] == "organizer"
     assert "telegram_user_id" not in result["participants"][0]
+    assert "status" not in result["participants"][0]
 
 
 @pytest.mark.asyncio
@@ -1496,7 +1622,7 @@ async def test_list_participants_not_found():
     from uuid import UUID
 
     class _ConnNotFound:
-        async def fetchval(self, sql, *args):
+        async def fetchrow(self, sql, *args):
             return None
 
         async def fetch(self, sql, *args):
@@ -1513,10 +1639,11 @@ async def test_list_participants_not_found():
 async def test_list_participants_empty():
     from backend.lobbies import list_lobby_participants
     from uuid import UUID
+    lobby_row = {"id": UUID("11111111-1111-1111-1111-111111111111"), "organizer_id": UUID("00000000-0000-0000-0000-000000000001")}
 
     class _ConnEmpty:
-        async def fetchval(self, sql, *args):
-            return UUID("11111111-1111-1111-1111-111111111111")
+        async def fetchrow(self, sql, *args):
+            return lobby_row
 
         async def fetch(self, sql, *args):
             return []
@@ -1530,6 +1657,32 @@ async def test_list_participants_empty():
 
 
 # --- API endpoint tests ---
+
+@pytest.mark.asyncio
+async def test_search_endpoint_registered():
+    _clear_rate_limit()
+    from backend.main import app
+    from fastapi.routing import APIRoute
+    paths = [r.path for r in app.routes if isinstance(r, APIRoute)]
+    assert "/api/search" in paths
+
+
+@pytest.mark.asyncio
+async def test_search_endpoint_works():
+    _clear_rate_limit()
+    from backend.main import app
+    mock_response = MagicMock()
+    mock_response.json.return_value = [{"lat": "55.75", "lon": "37.62", "display_name": "Moscow, Russia"}]
+    mock_response.status_code = 200
+    with patch("httpx.AsyncClient") as MockClient:
+        MockClient.return_value.__aenter__ = AsyncMock(return_value=MockClient.return_value)
+        MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+        MockClient.return_value.get = AsyncMock(return_value=mock_response)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/search?q=Moscow")
+            assert resp.status_code == 200
+            assert len(resp.json()["results"]) == 1
+
 
 @pytest.mark.asyncio
 async def test_join_endpoint_no_init_data():
@@ -1546,7 +1699,7 @@ async def test_join_endpoint_success():
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.join_lobby", new_callable=lambda: AsyncMock(return_value={"joined": True, "participant_count": 2})):
+         patch("backend.main.join_lobby", new_callable=lambda: AsyncMock(return_value={"joined": True, "already_joined": False, "participant_count": 2})):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/join",
                                 headers={"X-Telegram-Init-Data": init_data})
@@ -1555,17 +1708,18 @@ async def test_join_endpoint_success():
 
 
 @pytest.mark.asyncio
-async def test_join_endpoint_not_found():
+async def test_join_endpoint_already_joined_200():
     _clear_rate_limit()
     from backend.main import app
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.join_lobby", new_callable=lambda: AsyncMock(return_value={"error": "lobby_not_found"})):
+         patch("backend.main.join_lobby", new_callable=lambda: AsyncMock(return_value={"joined": True, "already_joined": True, "participant_count": 5})):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/join",
                                 headers={"X-Telegram-Init-Data": init_data})
-            assert resp.status_code == 404
+            assert resp.status_code == 200
+            assert resp.json()["already_joined"] is True
 
 
 @pytest.mark.asyncio
@@ -1597,17 +1751,45 @@ async def test_join_endpoint_cancelled():
 
 
 @pytest.mark.asyncio
-async def test_join_endpoint_already_joined():
+async def test_join_endpoint_past():
     _clear_rate_limit()
     from backend.main import app
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.join_lobby", new_callable=lambda: AsyncMock(return_value={"error": "already_joined"})):
+         patch("backend.main.join_lobby", new_callable=lambda: AsyncMock(return_value={"error": "lobby_past"})):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/join",
                                 headers={"X-Telegram-Init-Data": init_data})
             assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_join_endpoint_private_profile():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.join_lobby", new_callable=lambda: AsyncMock(return_value={"error": "private_profile"})):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/join",
+                                headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_join_endpoint_removed():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.join_lobby", new_callable=lambda: AsyncMock(return_value={"error": "participant_removed"})):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/join",
+                                headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -1640,12 +1822,26 @@ async def test_leave_endpoint_success():
     init_data = _make_init_data()
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.leave_lobby", new_callable=lambda: AsyncMock(return_value={"left": True, "participant_count": 0})):
+         patch("backend.main.leave_lobby", new_callable=lambda: AsyncMock(return_value={"left": True, "already_left": False, "participant_count": 0})):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/leave",
                                 headers={"X-Telegram-Init-Data": init_data})
             assert resp.status_code == 200
             assert resp.json()["left"] is True
+
+
+@pytest.mark.asyncio
+async def test_leave_endpoint_already_left_200():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.leave_lobby", new_callable=lambda: AsyncMock(return_value={"left": True, "already_left": True, "participant_count": 0})):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/leave",
+                                headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -1670,6 +1866,34 @@ async def test_leave_endpoint_organizer_cannot_leave():
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
          patch("backend.main.leave_lobby", new_callable=lambda: AsyncMock(return_value={"error": "organizer_cannot_leave"})):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/leave",
+                                headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_leave_endpoint_removed():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.leave_lobby", new_callable=lambda: AsyncMock(return_value={"error": "participant_removed"})):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/leave",
+                                headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_leave_endpoint_cancelled():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.leave_lobby", new_callable=lambda: AsyncMock(return_value={"error": "lobby_cancelled"})):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.post("/api/lobbies/11111111-1111-1111-1111-111111111111/leave",
                                 headers={"X-Telegram-Init-Data": init_data})
@@ -1749,7 +1973,7 @@ async def test_participants_endpoint_no_telegram_pii():
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             p = (await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111/participants",
                              headers={"X-Telegram-Init-Data": init_data})).json()["participants"][0]
-            for k in ("telegram_user_id", "first_name", "last_name", "language_code"):
+            for k in ("telegram_user_id", "first_name", "last_name", "language_code", "username"):
                 assert k not in p
 
 
@@ -1780,3 +2004,118 @@ async def test_participants_endpoint_db_error_safe(caplog):
                                headers={"X-Telegram-Init-Data": init_data})
             assert resp.status_code == 500
             assert "password=secret" not in caplog.text
+
+
+# --- Viewer state tests ---
+
+@pytest.mark.asyncio
+async def test_get_lobby_viewer_state_organizer():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    lobby_with_org = _mock_lobby()
+    lobby_with_org["organizer"] = _mock_organizer()
+    lobby_with_org["can_join"] = False
+    lobby_with_org["can_leave"] = False
+    lobby_with_org["viewer_role"] = "organizer"
+    lobby_with_org["viewer_status"] = "joined"
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.get_lobby_with_organizer_and_viewer", new_callable=lambda: AsyncMock(return_value=lobby_with_org)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
+                               headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["viewer_role"] == "organizer"
+            assert body["can_join"] is False
+            assert body["can_leave"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_lobby_viewer_state_joined():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    lobby_with_org = _mock_lobby()
+    lobby_with_org["organizer"] = _mock_organizer()
+    lobby_with_org["can_join"] = False
+    lobby_with_org["can_leave"] = True
+    lobby_with_org["viewer_role"] = "participant"
+    lobby_with_org["viewer_status"] = "joined"
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.get_lobby_with_organizer_and_viewer", new_callable=lambda: AsyncMock(return_value=lobby_with_org)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
+                               headers={"X-Telegram-Init-Data": init_data})
+            body = resp.json()
+            assert body["can_leave"] is True
+            assert body["can_join"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_lobby_viewer_state_left():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    lobby_with_org = _mock_lobby()
+    lobby_with_org["organizer"] = _mock_organizer()
+    lobby_with_org["can_join"] = True
+    lobby_with_org["can_leave"] = False
+    lobby_with_org["viewer_role"] = "participant"
+    lobby_with_org["viewer_status"] = "left"
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.get_lobby_with_organizer_and_viewer", new_callable=lambda: AsyncMock(return_value=lobby_with_org)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
+                               headers={"X-Telegram-Init-Data": init_data})
+            body = resp.json()
+            assert body["can_join"] is True
+            assert body["can_leave"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_lobby_viewer_state_removed():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    lobby_with_org = _mock_lobby()
+    lobby_with_org["organizer"] = _mock_organizer()
+    lobby_with_org["can_join"] = False
+    lobby_with_org["can_leave"] = False
+    lobby_with_org["viewer_role"] = "participant"
+    lobby_with_org["viewer_status"] = "removed"
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.get_lobby_with_organizer_and_viewer", new_callable=lambda: AsyncMock(return_value=lobby_with_org)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
+                               headers={"X-Telegram-Init-Data": init_data})
+            body = resp.json()
+            assert body["can_join"] is False
+            assert body["can_leave"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_lobby_viewer_state_no_membership():
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    lobby_with_org = _mock_lobby()
+    lobby_with_org["organizer"] = _mock_organizer()
+    lobby_with_org["can_join"] = True
+    lobby_with_org["can_leave"] = False
+    lobby_with_org["viewer_role"] = None
+    lobby_with_org["viewer_status"] = None
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.get_lobby_with_organizer_and_viewer", new_callable=lambda: AsyncMock(return_value=lobby_with_org)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/lobbies/11111111-1111-1111-1111-111111111111",
+                               headers={"X-Telegram-Init-Data": init_data})
+            body = resp.json()
+            assert body["viewer_role"] is None
+            assert body["can_join"] is True
+            assert body["can_leave"] is False
