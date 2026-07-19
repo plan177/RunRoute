@@ -2469,8 +2469,12 @@ function safeAvatar(url, size) {
     const wrap = safeCreateEl('div', { className: 'follow-list-avatar-placeholder' });
     safeSetText(wrap, '\u{1F3C3}');
     if (!url) return wrap;
-    const parsed = new URL(url, location.href);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return wrap;
+    try {
+        const parsed = new URL(url, location.href);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return wrap;
+    } catch {
+        return wrap;
+    }
     const img = safeCreateEl('img', {
         src: url,
         alt: '',
@@ -2918,6 +2922,11 @@ let lobbyPointSource = null; // 'gps' | 'saved_route' | null
 let lobbyShownIds = new Set();
 let lobbyRequestToken = 0;
 let lobbyLoadMoreBusy = false;
+let lobbyBusyActions = new Set();
+
+function lobbyIsBusy(action) { return lobbyBusyActions.has(action); }
+function lobbySetBusy(action) { lobbyBusyActions.add(action); }
+function lobbyClearBusy(action) { lobbyBusyActions.delete(action); }
 
 function initLobby() {
     const lobbyBtn = document.getElementById('menu-lobby');
@@ -3019,7 +3028,6 @@ async function loadLobbyList(append, periodOverride) {
     const emptyEl = document.getElementById('lobby-list-empty');
     const statusEl = document.getElementById('lobby-list-status');
     const loadMoreEl = document.getElementById('lobby-list-load-more');
-    const loadMoreBtn = document.getElementById('lobby-list-load-more-btn');
 
     if (!append) {
         itemsEl.innerHTML = '';
@@ -3119,15 +3127,17 @@ async function openLobbyDetail(lobbyId) {
     statusEl.classList.add('hidden');
 
     try {
-        const resp = await fetch(apiUrl('/api/lobbies/' + lobbyId), { headers: getApiHeaders() });
+        const [lobbyResp, participantsResp] = await Promise.all([
+            fetch(apiUrl('/api/lobbies/' + lobbyId), { headers: getApiHeaders() }),
+            fetch(apiUrl('/api/lobbies/' + lobbyId + '/participants'), { headers: getApiHeaders() })
+        ]);
         loadingEl.classList.add('hidden');
-        if (!resp.ok) {
-            lobbyShowDetailStatus(RunRouteLobbyUtils.getLobbyErrorText(resp.status), true);
+        if (!lobbyResp.ok) {
+            lobbyShowDetailStatus(RunRouteLobbyUtils.getLobbyErrorText(lobbyResp.status), true);
             return;
         }
-        const lobby = await resp.json();
+        const lobby = await lobbyResp.json();
 
-        const participantsResp = await fetch(apiUrl('/api/lobbies/' + lobbyId + '/participants'), { headers: getApiHeaders() });
         let participants = [];
         if (participantsResp.ok) {
             const pData = await participantsResp.json();
@@ -3251,7 +3261,7 @@ function buildLobbyDetailDom(container, lobby, participants) {
     }
 }
 
-function lobbyHandlePrivateProfile(status, detail, statusEl) {
+function lobbyHandlePrivateProfile(status, detail) {
     if (!RunRouteLobbyUtils.isPrivateProfileError(status, detail)) return false;
     const text = RunRouteLobbyUtils.getLobbyErrorText(status, detail);
     lobbyShowDetailStatusHtml(text + ' __PROFILE_LINK__', true);
@@ -3259,6 +3269,8 @@ function lobbyHandlePrivateProfile(status, detail, statusEl) {
 }
 
 async function joinLobby(lobbyId) {
+    if (lobbyIsBusy('join')) return;
+    lobbySetBusy('join');
     const statusEl = document.getElementById('lobby-detail-status');
     statusEl.classList.add('hidden');
     try {
@@ -3267,18 +3279,40 @@ async function joinLobby(lobbyId) {
         });
         if (!resp.ok) {
             const body = await resp.json().catch(() => ({}));
-            if (lobbyHandlePrivateProfile(resp.status, body.detail, statusEl)) return;
+            if (lobbyHandlePrivateProfile(resp.status, body.detail)) return;
             lobbyShowDetailStatus(RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail), true);
             return;
         }
-        await openLobbyDetail(lobbyId);
-        refreshLobbyListItem(lobbyId);
+        const lobbyResp = await fetch(apiUrl('/api/lobbies/' + lobbyId), { headers: getApiHeaders() });
+        if (lobbyResp.ok) {
+            const lobby = await lobbyResp.json();
+            const participantsResp = await fetch(apiUrl('/api/lobbies/' + lobbyId + '/participants'), { headers: getApiHeaders() });
+            let participants = [];
+            if (participantsResp.ok) {
+                const pData = await participantsResp.json();
+                participants = pData.participants || [];
+            }
+            const contentEl = document.getElementById('lobby-detail-content');
+            contentEl.innerHTML = '';
+            buildLobbyDetailDom(contentEl, lobby, participants);
+            contentEl.classList.remove('hidden');
+            const joinBtn = contentEl.querySelector('#lobby-join-btn');
+            const leaveBtn = contentEl.querySelector('#lobby-leave-btn');
+            const cancelBtn = contentEl.querySelector('#lobby-cancel-btn');
+            if (joinBtn) joinBtn.addEventListener('click', () => joinLobby(lobbyId));
+            if (leaveBtn) leaveBtn.addEventListener('click', () => leaveLobbyAction(lobbyId));
+            if (cancelBtn) cancelBtn.addEventListener('click', () => cancelLobbyAction(lobbyId));
+            refreshLobbyListItem(lobbyId, lobby);
+        }
     } catch {
         lobbyShowDetailStatus('Сервис временно недоступен', true);
+    } finally {
+        lobbyClearBusy('join');
     }
 }
 
 async function leaveLobbyAction(lobbyId) {
+    if (lobbyIsBusy('leave')) return;
     const statusEl = document.getElementById('lobby-detail-status');
     statusEl.classList.add('hidden');
     const confirmEl = document.getElementById('confirm-modal');
@@ -3299,6 +3333,7 @@ async function leaveLobbyAction(lobbyId) {
     const onOverlay = (e) => { if (e.target === confirmEl) cleanup(); };
     const onYes = async () => {
         cleanup();
+        lobbySetBusy('leave');
         try {
             const resp = await fetch(apiUrl('/api/lobbies/' + lobbyId + '/leave'), {
                 method: 'POST', headers: getApiHeaders()
@@ -3308,10 +3343,31 @@ async function leaveLobbyAction(lobbyId) {
                 lobbyShowDetailStatus(RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail), true);
                 return;
             }
-            await openLobbyDetail(lobbyId);
-            refreshLobbyListItem(lobbyId);
+            const lobbyResp = await fetch(apiUrl('/api/lobbies/' + lobbyId), { headers: getApiHeaders() });
+            if (lobbyResp.ok) {
+                const lobby = await lobbyResp.json();
+                const participantsResp = await fetch(apiUrl('/api/lobbies/' + lobbyId + '/participants'), { headers: getApiHeaders() });
+                let participants = [];
+                if (participantsResp.ok) {
+                    const pData = await participantsResp.json();
+                    participants = pData.participants || [];
+                }
+                const contentEl = document.getElementById('lobby-detail-content');
+                contentEl.innerHTML = '';
+                buildLobbyDetailDom(contentEl, lobby, participants);
+                contentEl.classList.remove('hidden');
+                const joinBtn = contentEl.querySelector('#lobby-join-btn');
+                const leaveBtn = contentEl.querySelector('#lobby-leave-btn');
+                const cancelBtn = contentEl.querySelector('#lobby-cancel-btn');
+                if (joinBtn) joinBtn.addEventListener('click', () => joinLobby(lobbyId));
+                if (leaveBtn) leaveBtn.addEventListener('click', () => leaveLobbyAction(lobbyId));
+                if (cancelBtn) cancelBtn.addEventListener('click', () => cancelLobbyAction(lobbyId));
+                refreshLobbyListItem(lobbyId, lobby);
+            }
         } catch {
             lobbyShowDetailStatus('Сервис временно недоступен', true);
+        } finally {
+            lobbyClearBusy('leave');
         }
     };
 
@@ -3321,6 +3377,7 @@ async function leaveLobbyAction(lobbyId) {
 }
 
 async function cancelLobbyAction(lobbyId) {
+    if (lobbyIsBusy('cancel')) return;
     const statusEl = document.getElementById('lobby-detail-status');
     statusEl.classList.add('hidden');
     const confirmEl = document.getElementById('confirm-modal');
@@ -3341,6 +3398,7 @@ async function cancelLobbyAction(lobbyId) {
     const onOverlay = (e) => { if (e.target === confirmEl) cleanup(); };
     const onYes = async () => {
         cleanup();
+        lobbySetBusy('cancel');
         try {
             const resp = await fetch(apiUrl('/api/lobbies/' + lobbyId + '/cancel'), {
                 method: 'POST', headers: getApiHeaders()
@@ -3351,9 +3409,11 @@ async function cancelLobbyAction(lobbyId) {
                 return;
             }
             showLobbyList();
-            loadLobbyList();
+            await loadLobbyList();
         } catch {
             lobbyShowDetailStatus('Сервис временно недоступен', true);
+        } finally {
+            lobbyClearBusy('cancel');
         }
     };
 
@@ -3362,20 +3422,33 @@ async function cancelLobbyAction(lobbyId) {
     confirmEl.addEventListener('click', onOverlay);
 }
 
-async function refreshLobbyListItem(lobbyId) {
-    try {
-        const resp = await fetch(apiUrl('/api/lobbies/' + lobbyId), { headers: getApiHeaders() });
-        if (!resp.ok) return;
-        const lobby = await resp.json();
-        const existing = document.querySelector('.lobby-card[data-lobby-id="' + lobbyId + '"]');
-        if (!existing) return;
-        const newCard = RunRouteLobbyUtils.renderLobbyCard(lobby, safeCreateEl, safeAvatar);
-        existing.replaceWith(newCard);
-    } catch { /* silent */ }
+async function refreshLobbyListItem(lobbyId, lobby) {
+    if (!lobby) {
+        try {
+            const resp = await fetch(apiUrl('/api/lobbies/' + lobbyId), { headers: getApiHeaders() });
+            if (!resp.ok) return;
+            lobby = await resp.json();
+        } catch { return; }
+    }
+    const existing = document.querySelector('.lobby-card[data-lobby-id="' + lobbyId + '"]');
+    if (!existing) return;
+    const newCard = RunRouteLobbyUtils.renderLobbyCard(lobby, safeCreateEl, safeAvatar);
+    existing.replaceWith(newCard);
 }
 
-async function openLobbyCreateForm() {
-    showLobbyCreate();
+function resetLobbyCreateForm() {
+    document.getElementById('lobby-form-title').value = '';
+    document.getElementById('lobby-form-type').value = 'easy';
+    document.getElementById('lobby-form-date').value = '';
+    document.getElementById('lobby-form-city').value = '';
+    document.getElementById('lobby-form-area').value = '';
+    document.getElementById('lobby-form-route').value = '';
+    document.getElementById('lobby-form-distance').value = '';
+    document.getElementById('lobby-form-pace-min').value = '';
+    document.getElementById('lobby-form-pace-max').value = '';
+    document.getElementById('lobby-form-duration').value = '';
+    document.getElementById('lobby-form-capacity').value = '10';
+    document.getElementById('lobby-form-desc').value = '';
     lobbyMeetingPoint = null;
     lobbyPointSource = null;
     document.getElementById('lobby-point-status').textContent = 'Точка не выбрана';
@@ -3383,6 +3456,11 @@ async function openLobbyCreateForm() {
     document.getElementById('lobby-create-status').classList.add('hidden');
     document.getElementById('lobby-route-point-hint').classList.add('hidden');
     document.getElementById('lobby-form-route-add-btn').classList.add('hidden');
+}
+
+async function openLobbyCreateForm() {
+    showLobbyCreate();
+    resetLobbyCreateForm();
 
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -3455,14 +3533,51 @@ async function useRouteStartForLobby() {
 function useGpsForLobby() {
     const el = document.getElementById('lobby-point-status');
 
+    // 1. Fresh lastKnownLocation
     if (lastKnownLocation && (Date.now() - lastKnownLocation.timestamp < 300000)) {
-        lobbyMeetingPoint = { lat: lastKnownLocation.lat, lng: lastKnownLocation.lng };
-        lobbyPointSource = 'gps';
-        el.textContent = 'Выбрана текущая геопозиция';
-        el.className = 'lobby-point-status success';
+        const ll = lastKnownLocation;
+        if (RunRouteLobbyUtils.lobbyCoordsValid(ll.lat, ll.lng)) {
+            lobbyMeetingPoint = { lat: ll.lat, lng: ll.lng };
+            lobbyPointSource = 'gps';
+            el.textContent = 'Выбрана текущая геопозиция';
+            el.className = 'lobby-point-status success';
+            return;
+        }
+    }
+
+    // 2. Telegram LocationManager
+    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.LocationManager) {
+        el.textContent = 'Определение местоположения...';
+        el.className = 'lobby-point-status';
+        try {
+            window.Telegram.WebApp.LocationManager.getLocation((err, location) => {
+                if (err || !location) {
+                    // 3. Fallback to browser geolocation
+                    _useBrowserGeolocation(el);
+                    return;
+                }
+                const lat = location.latitude != null ? location.latitude : (location.lat != null ? location.lat : null);
+                const lng = location.longitude != null ? location.longitude : (location.lng != null ? location.lng : null);
+                if (lat == null || lng == null || !RunRouteLobbyUtils.lobbyCoordsValid(lat, lng)) {
+                    _useBrowserGeolocation(el);
+                    return;
+                }
+                lobbyMeetingPoint = { lat, lng };
+                lobbyPointSource = 'gps';
+                el.textContent = 'Выбрана текущая геопозиция';
+                el.className = 'lobby-point-status success';
+            });
+        } catch {
+            _useBrowserGeolocation(el);
+        }
         return;
     }
 
+    // 3. Browser geolocation fallback
+    _useBrowserGeolocation(el);
+}
+
+function _useBrowserGeolocation(el) {
     if (!navigator.geolocation) {
         el.textContent = 'Геолокация не поддерживается';
         el.className = 'lobby-point-status error';
@@ -3474,13 +3589,26 @@ function useGpsForLobby() {
 
     navigator.geolocation.getCurrentPosition(
         (pos) => {
-            lobbyMeetingPoint = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            if (!RunRouteLobbyUtils.lobbyCoordsValid(lat, lng)) {
+                el.textContent = 'Получены некорректные координаты';
+                el.className = 'lobby-point-status error';
+                return;
+            }
+            lobbyMeetingPoint = { lat, lng };
             lobbyPointSource = 'gps';
             el.textContent = 'Выбрана текущая геопозиция';
             el.className = 'lobby-point-status success';
         },
-        () => {
-            el.textContent = 'Не удалось определить местоположение. Разрешите доступ к геопозиции.';
+        (err) => {
+            if (err.code === 1) {
+                el.textContent = 'Доступ к геопозиции запрещён. Разрешите доступ в настройках.';
+            } else if (err.code === 2) {
+                el.textContent = 'Местоположение недоступно';
+            } else {
+                el.textContent = 'Не удалось определить местоположение';
+            }
             el.className = 'lobby-point-status error';
         },
         { enableHighAccuracy: true, timeout: 10000 }
@@ -3495,6 +3623,7 @@ function lobbyShowCreateStatus(text) {
 }
 
 async function submitLobbyCreate() {
+    if (lobbyIsBusy('create')) return;
     const statusEl = document.getElementById('lobby-create-status');
     statusEl.classList.add('hidden');
 
@@ -3540,20 +3669,25 @@ async function submitLobbyCreate() {
         return;
     }
 
+    const distVal = RunRouteLobbyUtils.parseStrictInteger(distanceM);
+    const durVal = RunRouteLobbyUtils.parseStrictInteger(duration);
+    const capVal = RunRouteLobbyUtils.parseStrictInteger(capacity);
+
     const payload = RunRouteLobbyUtils.buildLobbyCreatePayload({
         title, runType,
         startsAt: new Date(dateVal).toISOString(),
         city, meetingLat: lobbyMeetingPoint.lat, meetingLng: lobbyMeetingPoint.lng,
         areaLabel: areaLabel || undefined,
         savedRouteId: routeId || undefined,
-        distanceM: distanceM ? parseInt(distanceM) : undefined,
+        distanceM: distVal,
         paceMin: paceMinResult.value,
         paceMax: paceMaxResult.value,
-        durationMinutes: duration ? parseInt(duration) : undefined,
-        capacity: capacity ? parseInt(capacity) : undefined,
+        durationMinutes: durVal,
+        capacity: capVal,
         description: description || undefined,
     });
 
+    lobbySetBusy('create');
     const submitBtn = document.getElementById('lobby-create-submit');
     submitBtn.disabled = true;
     submitBtn.textContent = 'Создание...';
@@ -3581,11 +3715,14 @@ async function submitLobbyCreate() {
             return;
         }
         const lobby = await resp.json();
-        loadLobbyList();
+        resetLobbyCreateForm();
+        showLobbyList();
+        await loadLobbyList();
         openLobbyDetail(lobby.id);
     } catch {
         lobbyShowCreateStatus('Сервис временно недоступен');
     } finally {
+        lobbyClearBusy('create');
         submitBtn.disabled = false;
         submitBtn.textContent = 'Создать';
     }

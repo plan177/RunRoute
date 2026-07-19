@@ -59,11 +59,16 @@
         const trimmed = str.trim();
         const parts = trimmed.split(':');
         if (parts.length === 2) {
+            if (parts[0] === '' || parts[1] === '') return null;
+            if (!/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1])) return null;
+            if (parts[1].length !== 2) return null;
             const m = parseInt(parts[0], 10);
             const s = parseInt(parts[1], 10);
             if (isNaN(m) || isNaN(s) || m < 0 || s < 0 || s >= 60) return null;
+            if (m > 59) return null;
             return m * 60 + s;
         }
+        if (!/^\d+$/.test(trimmed)) return null;
         const num = parseInt(trimmed, 10);
         if (isNaN(num) || num < 0) return null;
         return num;
@@ -91,21 +96,38 @@
         return d.getTime() > Date.now();
     }
 
+    function validateStrictInteger(value, min, max) {
+        if (value === '' || value == null) return true;
+        if (typeof value === 'number') {
+            return Number.isInteger(value) && value >= min && value <= max;
+        }
+        const s = String(value).trim();
+        if (s === '') return true;
+        if (!/^-?\d+$/.test(s)) return false;
+        const n = parseInt(s, 10);
+        return n >= min && n <= max;
+    }
+
     function validateCapacity(value) {
-        const n = Number(value);
-        return Number.isInteger(n) && n >= 2 && n <= 100;
+        return validateStrictInteger(value, 2, 100);
     }
 
     function validateDistanceM(value) {
         if (value === '' || value == null) return true;
-        const n = Number(value);
-        return Number.isInteger(n) && n > 0;
+        if (!validateStrictInteger(value, 1, Infinity)) return false;
+        return true;
     }
 
     function validateDuration(value) {
-        if (value === '' || value == null) return true;
-        const n = Number(value);
-        return Number.isInteger(n) && n >= 1 && n <= 1440;
+        return validateStrictInteger(value, 1, 1440);
+    }
+
+    function parseStrictInteger(value) {
+        if (value === '' || value == null) return undefined;
+        const s = String(value).trim();
+        if (s === '') return undefined;
+        if (!/^-?\d+$/.test(s)) return NaN;
+        return parseInt(s, 10);
     }
 
     function getFirstRoutePoint(route) {
@@ -216,11 +238,18 @@
         return card;
     }
 
+    function lobbyCoordsValid(lat, lng) {
+        return typeof lat === 'number' && typeof lng === 'number'
+            && isFinite(lat) && isFinite(lng)
+            && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+    }
+
     return {
         escapeHtml, formatRunType, formatLobbyDate, formatParticipants,
         formatDistanceM, formatPace, parsePaceInput, validatePaceInput,
         formatPaceInput, validateFutureDate, validateCapacity,
-        validateDistanceM, validateDuration,
+        validateDistanceM, validateDuration, validateStrictInteger,
+        parseStrictInteger, lobbyCoordsValid,
         getFirstRoutePoint, getLobbyErrorText, isPrivateProfileError,
         buildLobbyQueryParams, buildLobbyCreatePayload, renderLobbyCard
     };
