@@ -56,16 +56,25 @@
 
     function parsePaceInput(str) {
         if (!str || !str.trim()) return null;
-        const parts = str.trim().split(':');
+        const trimmed = str.trim();
+        const parts = trimmed.split(':');
         if (parts.length === 2) {
             const m = parseInt(parts[0], 10);
             const s = parseInt(parts[1], 10);
             if (isNaN(m) || isNaN(s) || m < 0 || s < 0 || s >= 60) return null;
             return m * 60 + s;
         }
-        const num = parseInt(str, 10);
+        const num = parseInt(trimmed, 10);
         if (isNaN(num) || num < 0) return null;
         return num;
+    }
+
+    function validatePaceInput(str) {
+        if (!str || !str.trim()) return { valid: true, value: null };
+        const value = parsePaceInput(str);
+        if (value === null) return { valid: false, error: 'Темп должен быть в формате mm:ss или числом секунд' };
+        if (value < 120 || value > 1800) return { valid: false, error: 'Темп должен быть от 2:00 до 30:00 /км' };
+        return { valid: true, value };
     }
 
     function formatPaceInput(secPerKm) {
@@ -87,12 +96,29 @@
         return Number.isInteger(n) && n >= 2 && n <= 100;
     }
 
+    function validateDistanceM(value) {
+        if (value === '' || value == null) return true;
+        const n = Number(value);
+        return Number.isInteger(n) && n > 0;
+    }
+
+    function validateDuration(value) {
+        if (value === '' || value == null) return true;
+        const n = Number(value);
+        return Number.isInteger(n) && n >= 1 && n <= 1440;
+    }
+
     function getFirstRoutePoint(route) {
-        if (!route || !Array.isArray(route.points) || route.points.length === 0) return null;
-        const p = route.points[0];
-        if (typeof p.lat !== 'number' || typeof p.lng !== 'number') return null;
-        if (!isFinite(p.lat) || !isFinite(p.lng)) return null;
-        return { lat: p.lat, lng: p.lng };
+        if (!route || !Array.isArray(route.points)) return null;
+        for (let i = 0; i < route.points.length; i++) {
+            const p = route.points[i];
+            if (p == null || typeof p !== 'object') continue;
+            if (typeof p.lat !== 'number' || typeof p.lng !== 'number') continue;
+            if (!isFinite(p.lat) || !isFinite(p.lng)) continue;
+            if (p.lat < -90 || p.lat > 90 || p.lng < -180 || p.lng > 180) continue;
+            return { lat: p.lat, lng: p.lng };
+        }
+        return null;
     }
 
     function getLobbyErrorText(status, detail) {
@@ -111,6 +137,24 @@
             case 422: return 'Проверьте заполнение формы';
             default: return 'Сервис временно недоступен';
         }
+    }
+
+    function isPrivateProfileError(status, detail) {
+        return status === 400 && detail && typeof detail === 'string'
+            && detail.toLowerCase().includes('public');
+    }
+
+    function buildLobbyQueryParams(filters, periodDays, cursor) {
+        const params = new URLSearchParams();
+        if (filters.city) params.set('city', filters.city);
+        if (filters.run_type) params.set('run_type', filters.run_type);
+        if (periodDays) {
+            const d = new Date();
+            d.setDate(d.getDate() + parseInt(periodDays));
+            params.set('to', d.toISOString());
+        }
+        if (cursor) params.set('cursor', cursor);
+        return params;
     }
 
     function buildLobbyCreatePayload(data) {
@@ -133,44 +177,51 @@
         return body;
     }
 
-    function renderLobbyCard(lobby) {
-        const name = escapeHtml(lobby.title || '');
-        const type = escapeHtml(formatRunType(lobby.run_type));
-        const date = escapeHtml(formatLobbyDate(lobby.starts_at));
-        const city = escapeHtml(lobby.city || '');
-        const area = lobby.area_label ? '<span class="lobby-card-area">' + escapeHtml(lobby.area_label) + '</span>' : '';
-        const dist = lobby.distance_m != null ? '<span class="lobby-card-dist">' + escapeHtml(formatDistanceM(lobby.distance_m)) + '</span>' : '';
-        const pace = lobby.pace_min_sec_per_km != null ? '<span class="lobby-card-pace">' + escapeHtml(formatPace(lobby.pace_min_sec_per_km)) + '</span>' : '';
-        const dur = lobby.duration_minutes != null ? '<span class="lobby-card-dur">' + lobby.duration_minutes + ' мин</span>' : '';
-        const participants = escapeHtml(formatParticipants(lobby.participant_count, lobby.capacity));
-        const orgName = lobby.organizer ? escapeHtml(lobby.organizer.display_name || 'Без имени') : '';
-        const orgAvatar = lobby.organizer && lobby.organizer.avatar_url
-            ? '<img class="lobby-card-avatar" src="' + escapeHtml(lobby.organizer.avatar_url) + '" alt="" />'
-            : '<div class="lobby-card-avatar lobby-card-avatar-empty"></div>';
+    function renderLobbyCard(lobby, safeCreateEl, safeAvatar) {
+        const card = safeCreateEl('div', { className: 'lobby-card', 'data-lobby-id': lobby.id });
 
-        return '<div class="lobby-card" data-lobby-id="' + escapeHtml(lobby.id) + '">'
-            + '<div class="lobby-card-header">'
-            + '<div class="lobby-card-title">' + name + '</div>'
-            + '<div class="lobby-card-type">' + type + '</div>'
-            + '</div>'
-            + '<div class="lobby-card-meta">'
-            + '<span class="lobby-card-date">' + date + '</span>'
-            + '<span class="lobby-card-city">' + city + area + '</span>'
-            + '</div>'
-            + '<div class="lobby-card-details">'
-            + dist + pace + dur
-            + '</div>'
-            + '<div class="lobby-card-footer">'
-            + '<div class="lobby-card-org">' + orgAvatar + '<span>' + orgName + '</span></div>'
-            + '<div class="lobby-card-participants">👤 ' + participants + '</div>'
-            + '</div>'
-            + '</div>';
+        const header = safeCreateEl('div', { className: 'lobby-card-header' });
+        header.appendChild(safeCreateEl('div', { className: 'lobby-card-title', textContent: lobby.title || '' }));
+        header.appendChild(safeCreateEl('div', { className: 'lobby-card-type', textContent: formatRunType(lobby.run_type) }));
+        card.appendChild(header);
+
+        const meta = safeCreateEl('div', { className: 'lobby-card-meta' });
+        meta.appendChild(safeCreateEl('span', { className: 'lobby-card-date', textContent: formatLobbyDate(lobby.starts_at) }));
+        const cityText = lobby.area_label ? (lobby.city || '') + ', ' + lobby.area_label : (lobby.city || '');
+        meta.appendChild(safeCreateEl('span', { className: 'lobby-card-city', textContent: cityText }));
+        card.appendChild(meta);
+
+        const details = safeCreateEl('div', { className: 'lobby-card-details' });
+        if (lobby.distance_m != null) {
+            details.appendChild(safeCreateEl('span', { className: 'lobby-card-dist', textContent: formatDistanceM(lobby.distance_m) }));
+        }
+        if (lobby.pace_min_sec_per_km != null) {
+            details.appendChild(safeCreateEl('span', { className: 'lobby-card-pace', textContent: formatPace(lobby.pace_min_sec_per_km) }));
+        }
+        if (lobby.duration_minutes != null) {
+            details.appendChild(safeCreateEl('span', { className: 'lobby-card-dur', textContent: lobby.duration_minutes + ' мин' }));
+        }
+        card.appendChild(details);
+
+        const footer = safeCreateEl('div', { className: 'lobby-card-footer' });
+        const orgDiv = safeCreateEl('div', { className: 'lobby-card-org' });
+        if (lobby.organizer) {
+            orgDiv.appendChild(safeAvatar(lobby.organizer.avatar_url, 20));
+            orgDiv.appendChild(safeCreateEl('span', { textContent: lobby.organizer.display_name || 'Без имени' }));
+        }
+        footer.appendChild(orgDiv);
+        footer.appendChild(safeCreateEl('div', { className: 'lobby-card-participants', textContent: '\uD83D\uDC64 ' + formatParticipants(lobby.participant_count, lobby.capacity) }));
+        card.appendChild(footer);
+
+        return card;
     }
 
     return {
         escapeHtml, formatRunType, formatLobbyDate, formatParticipants,
-        formatDistanceM, formatPace, parsePaceInput, formatPaceInput,
-        validateFutureDate, validateCapacity, getFirstRoutePoint,
-        getLobbyErrorText, buildLobbyCreatePayload, renderLobbyCard
+        formatDistanceM, formatPace, parsePaceInput, validatePaceInput,
+        formatPaceInput, validateFutureDate, validateCapacity,
+        validateDistanceM, validateDuration,
+        getFirstRoutePoint, getLobbyErrorText, isPrivateProfileError,
+        buildLobbyQueryParams, buildLobbyCreatePayload, renderLobbyCard
     };
 });

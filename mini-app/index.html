@@ -713,8 +713,9 @@
             <div class="profile-field">
                 <label for="lobby-form-route">Сохранённый маршрут</label>
                 <select id="lobby-form-route"><option value="">Без маршрута</option></select>
+                <div id="lobby-route-point-hint" class="field-hint hidden">Нажмите «Использовать старт маршрута» чтобы выбрать стартовую точку</div>
+                <button type="button" id="lobby-form-route-add-btn" class="modal-btn secondary hidden" style="margin-top:6px;width:100%;">Использовать старт маршрута</button>
             </div>
-            <div id="lobby-route-point-hint" class="field-hint hidden">Стартовая точка маршрута будет использована как точка встречи</div>
             <div class="profile-field">
                 <label for="lobby-form-distance">Дистанция (м)</label>
                 <input type="number" id="lobby-form-distance" min="1" placeholder="опционально" />

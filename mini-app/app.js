@@ -2914,6 +2914,10 @@ function initFollowList() {
 let lobbyNextCursor = null;
 let lobbyCurrentFilters = {};
 let lobbyMeetingPoint = null;
+let lobbyPointSource = null; // 'gps' | 'saved_route' | null
+let lobbyShownIds = new Set();
+let lobbyRequestToken = 0;
+let lobbyLoadMoreBusy = false;
 
 function initLobby() {
     const lobbyBtn = document.getElementById('menu-lobby');
@@ -2933,19 +2937,33 @@ function initLobby() {
     document.getElementById('lobby-create-submit').addEventListener('click', submitLobbyCreate);
     document.getElementById('lobby-use-gps-btn').addEventListener('click', useGpsForLobby);
 
+    document.getElementById('lobby-list-items').addEventListener('click', (e) => {
+        const card = e.target.closest('.lobby-card');
+        if (card) openLobbyDetail(card.dataset.lobbyId);
+    });
+
     const routeSelect = document.getElementById('lobby-form-route');
     routeSelect.addEventListener('change', onLobbyRouteSelect);
+
+    document.getElementById('lobby-form-route-add-btn').addEventListener('click', useRouteStartForLobby);
 }
 
 function openLobbyPanel() {
     document.getElementById('lobby-panel').classList.remove('hidden');
     showLobbyList();
-    loadLobbyList();
+    const period = document.getElementById('lobby-filter-period').value;
+    if (period && Object.keys(lobbyCurrentFilters).length === 0 && lobbyShownIds.size === 0) {
+        lobbyCurrentFilters = {};
+        applyLobbyFilters();
+    } else {
+        loadLobbyList();
+    }
 }
 
 function closeLobbyPanel() {
     document.getElementById('lobby-panel').classList.add('hidden');
     lobbyNextCursor = null;
+    lobbyShownIds.clear();
 }
 
 function showLobbyList() {
@@ -2973,13 +2991,9 @@ function applyLobbyFilters() {
     const period = document.getElementById('lobby-filter-period').value;
     if (city) lobbyCurrentFilters.city = city;
     if (type) lobbyCurrentFilters.run_type = type;
-    if (period) {
-        const d = new Date();
-        d.setDate(d.getDate() + parseInt(period));
-        lobbyCurrentFilters.to = d.toISOString();
-    }
     lobbyNextCursor = null;
-    loadLobbyList();
+    lobbyShownIds.clear();
+    loadLobbyList(false, period);
 }
 
 function resetLobbyFilters() {
@@ -2988,37 +3002,45 @@ function resetLobbyFilters() {
     document.getElementById('lobby-filter-period').value = '7';
     lobbyCurrentFilters = {};
     lobbyNextCursor = null;
-    loadLobbyList();
+    lobbyShownIds.clear();
+    loadLobbyList(false, '7');
 }
 
-async function loadLobbyList(append) {
+function lobbyShowStatus(text, isError) {
+    const el = document.getElementById('lobby-list-status');
+    el.textContent = text;
+    el.className = isError ? 'profile-status error' : 'profile-status';
+    el.classList.remove('hidden');
+}
+
+async function loadLobbyList(append, periodOverride) {
     const itemsEl = document.getElementById('lobby-list-items');
     const loadingEl = document.getElementById('lobby-list-loading');
     const emptyEl = document.getElementById('lobby-list-empty');
     const statusEl = document.getElementById('lobby-list-status');
     const loadMoreEl = document.getElementById('lobby-list-load-more');
+    const loadMoreBtn = document.getElementById('lobby-list-load-more-btn');
 
     if (!append) {
         itemsEl.innerHTML = '';
+        lobbyShownIds.clear();
         loadingEl.classList.remove('hidden');
         emptyEl.classList.add('hidden');
         statusEl.classList.add('hidden');
     }
     loadMoreEl.classList.add('hidden');
 
-    const params = new URLSearchParams();
-    if (lobbyCurrentFilters.city) params.set('city', lobbyCurrentFilters.city);
-    if (lobbyCurrentFilters.run_type) params.set('run_type', lobbyCurrentFilters.run_type);
-    if (lobbyCurrentFilters.to) params.set('to', lobbyCurrentFilters.to);
-    if (lobbyNextCursor) params.set('cursor', lobbyNextCursor);
+    const period = periodOverride != null ? periodOverride : document.getElementById('lobby-filter-period').value;
+    const params = RunRouteLobbyUtils.buildLobbyQueryParams(lobbyCurrentFilters, period, lobbyNextCursor);
+
+    const token = ++lobbyRequestToken;
 
     try {
         const resp = await fetch(apiUrl('/api/lobbies?' + params.toString()), { headers: getApiHeaders() });
+        if (token !== lobbyRequestToken) return;
         loadingEl.classList.add('hidden');
         if (!resp.ok) {
-            statusEl.textContent = RunRouteLobbyUtils.getLobbyErrorText(resp.status);
-            statusEl.className = 'profile-status error';
-            statusEl.classList.remove('hidden');
+            lobbyShowStatus(RunRouteLobbyUtils.getLobbyErrorText(resp.status), true);
             return;
         }
         const data = await resp.json();
@@ -3030,32 +3052,59 @@ async function loadLobbyList(append) {
             return;
         }
 
-        const html = items.map(RunRouteLobbyUtils.renderLobbyCard).join('');
-        if (append) {
-            itemsEl.insertAdjacentHTML('beforeend', html);
-        } else {
-            itemsEl.innerHTML = html;
-        }
-
-        itemsEl.querySelectorAll('.lobby-card').forEach(card => {
-            card.addEventListener('click', () => {
-                openLobbyDetail(card.dataset.lobbyId);
-            });
+        items.forEach(lobby => {
+            if (lobbyShownIds.has(lobby.id)) return;
+            lobbyShownIds.add(lobby.id);
+            const card = RunRouteLobbyUtils.renderLobbyCard(lobby, safeCreateEl, safeAvatar);
+            itemsEl.appendChild(card);
         });
 
         if (lobbyNextCursor) {
             loadMoreEl.classList.remove('hidden');
         }
     } catch {
+        if (token !== lobbyRequestToken) return;
         loadingEl.classList.add('hidden');
-        statusEl.textContent = 'Сервис временно недоступен';
-        statusEl.className = 'profile-status error';
-        statusEl.classList.remove('hidden');
+        lobbyShowStatus('Сервис временно недоступен', true);
     }
 }
 
 function loadMoreLobbies() {
-    loadLobbyList(true);
+    if (lobbyLoadMoreBusy) return;
+    lobbyLoadMoreBusy = true;
+    const btn = document.getElementById('lobby-list-load-more-btn');
+    btn.disabled = true;
+    btn.textContent = 'Загрузка...';
+    loadLobbyList(true).finally(() => {
+        lobbyLoadMoreBusy = false;
+        btn.disabled = false;
+        btn.textContent = 'Показать ещё';
+    });
+}
+
+function lobbyShowDetailStatus(text, isError) {
+    const el = document.getElementById('lobby-detail-status');
+    el.textContent = text;
+    el.className = isError ? 'profile-status error' : 'profile-status';
+    el.classList.remove('hidden');
+}
+
+function lobbyShowDetailStatusHtml(html, isError) {
+    const el = document.getElementById('lobby-detail-status');
+    el.innerHTML = '';
+    const parts = html.split('__PROFILE_LINK__');
+    el.appendChild(document.createTextNode(parts[0]));
+    if (parts.length > 1) {
+        const link = document.createElement('a');
+        link.href = '#';
+        link.textContent = 'Открыть профиль';
+        link.style.color = 'var(--accent)';
+        link.addEventListener('click', (e) => { e.preventDefault(); openProfileModal(); });
+        el.appendChild(link);
+        el.appendChild(document.createTextNode(parts[1]));
+    }
+    el.className = isError ? 'profile-status error' : 'profile-status';
+    el.classList.remove('hidden');
 }
 
 async function openLobbyDetail(lobbyId) {
@@ -3065,6 +3114,7 @@ async function openLobbyDetail(lobbyId) {
     const statusEl = document.getElementById('lobby-detail-status');
 
     loadingEl.classList.remove('hidden');
+    contentEl.innerHTML = '';
     contentEl.classList.add('hidden');
     statusEl.classList.add('hidden');
 
@@ -3072,9 +3122,7 @@ async function openLobbyDetail(lobbyId) {
         const resp = await fetch(apiUrl('/api/lobbies/' + lobbyId), { headers: getApiHeaders() });
         loadingEl.classList.add('hidden');
         if (!resp.ok) {
-            statusEl.textContent = RunRouteLobbyUtils.getLobbyErrorText(resp.status);
-            statusEl.className = 'profile-status error';
-            statusEl.classList.remove('hidden');
+            lobbyShowDetailStatus(RunRouteLobbyUtils.getLobbyErrorText(resp.status), true);
             return;
         }
         const lobby = await resp.json();
@@ -3086,7 +3134,8 @@ async function openLobbyDetail(lobbyId) {
             participants = pData.participants || [];
         }
 
-        contentEl.innerHTML = buildLobbyDetailHtml(lobby, participants);
+        contentEl.innerHTML = '';
+        buildLobbyDetailDom(contentEl, lobby, participants);
         contentEl.classList.remove('hidden');
 
         const joinBtn = contentEl.querySelector('#lobby-join-btn');
@@ -3098,85 +3147,115 @@ async function openLobbyDetail(lobbyId) {
         if (cancelBtn) cancelBtn.addEventListener('click', () => cancelLobbyAction(lobbyId));
     } catch {
         loadingEl.classList.add('hidden');
-        statusEl.textContent = 'Сервис временно недоступен';
-        statusEl.className = 'profile-status error';
-        statusEl.classList.remove('hidden');
+        lobbyShowDetailStatus('Сервис временно недоступен', true);
     }
 }
 
-function buildLobbyDetailHtml(lobby, participants) {
+function buildLobbyDetailDom(container, lobby, participants) {
     const L = RunRouteLobbyUtils;
-    let html = '<div class="lobby-detail-name">' + L.escapeHtml(lobby.title) + '</div>';
-    html += '<div class="lobby-detail-type">' + L.escapeHtml(L.formatRunType(lobby.run_type)) + '</div>';
 
-    html += '<div class="lobby-detail-section"><div class="lobby-detail-label">Дата и время</div>';
-    html += '<div class="lobby-detail-value">' + L.escapeHtml(L.formatLobbyDate(lobby.starts_at)) + '</div></div>';
+    const nameEl = safeCreateEl('div', { className: 'lobby-detail-name', textContent: lobby.title || '' });
+    container.appendChild(nameEl);
 
-    html += '<div class="lobby-detail-section"><div class="lobby-detail-label">Место</div>';
-    html += '<div class="lobby-detail-value">' + L.escapeHtml(lobby.city || '');
-    if (lobby.area_label) html += ', ' + L.escapeHtml(lobby.area_label);
-    html += '</div></div>';
+    const typeEl = safeCreateEl('div', { className: 'lobby-detail-type', textContent: L.formatRunType(lobby.run_type) });
+    container.appendChild(typeEl);
 
-    if (lobby.distance_m != null) {
-        html += '<div class="lobby-detail-section"><div class="lobby-detail-label">Дистанция</div>';
-        html += '<div class="lobby-detail-value">' + L.escapeHtml(L.formatDistanceM(lobby.distance_m)) + '</div></div>';
+    function addSection(label, valueText) {
+        const section = safeCreateEl('div', { className: 'lobby-detail-section' });
+        section.appendChild(safeCreateEl('div', { className: 'lobby-detail-label', textContent: label }));
+        section.appendChild(safeCreateEl('div', { className: 'lobby-detail-value', textContent: valueText }));
+        container.appendChild(section);
     }
+
+    addSection('Дата и время', L.formatLobbyDate(lobby.starts_at));
+
+    const placeText = lobby.area_label ? (lobby.city || '') + ', ' + lobby.area_label : (lobby.city || '');
+    addSection('Место', placeText);
+
+    if (lobby.distance_m != null) addSection('Дистанция', L.formatDistanceM(lobby.distance_m));
+
     if (lobby.pace_min_sec_per_km != null || lobby.pace_max_sec_per_km != null) {
-        html += '<div class="lobby-detail-section"><div class="lobby-detail-label">Темп</div>';
-        html += '<div class="lobby-detail-value">';
+        const section = safeCreateEl('div', { className: 'lobby-detail-section' });
+        section.appendChild(safeCreateEl('div', { className: 'lobby-detail-label', textContent: 'Темп' }));
+        const valEl = safeCreateEl('div', { className: 'lobby-detail-value' });
         if (lobby.pace_min_sec_per_km != null && lobby.pace_max_sec_per_km != null) {
-            html += L.escapeHtml(L.formatPace(lobby.pace_min_sec_per_km)) + ' — ' + L.escapeHtml(L.formatPace(lobby.pace_max_sec_per_km));
+            valEl.textContent = L.formatPace(lobby.pace_min_sec_per_km) + ' \u2014 ' + L.formatPace(lobby.pace_max_sec_per_km);
         } else if (lobby.pace_min_sec_per_km != null) {
-            html += 'от ' + L.escapeHtml(L.formatPace(lobby.pace_min_sec_per_km));
+            valEl.textContent = 'от ' + L.formatPace(lobby.pace_min_sec_per_km);
         } else {
-            html += 'до ' + L.escapeHtml(L.formatPace(lobby.pace_max_sec_per_km));
+            valEl.textContent = 'до ' + L.formatPace(lobby.pace_max_sec_per_km);
         }
-        html += '</div></div>';
-    }
-    if (lobby.duration_minutes != null) {
-        html += '<div class="lobby-detail-section"><div class="lobby-detail-label">Длительность</div>';
-        html += '<div class="lobby-detail-value">' + lobby.duration_minutes + ' мин</div></div>';
+        section.appendChild(valEl);
+        container.appendChild(section);
     }
 
-    html += '<div class="lobby-detail-section"><div class="lobby-detail-label">Участники</div>';
-    html += '<div class="lobby-detail-value">' + L.escapeHtml(L.formatParticipants(lobby.participant_count, lobby.capacity)) + '</div></div>';
+    if (lobby.duration_minutes != null) addSection('Длительность', lobby.duration_minutes + ' мин');
+    addSection('Участники', L.formatParticipants(lobby.participant_count, lobby.capacity));
 
     if (lobby.description) {
-        html += '<div class="lobby-detail-section"><div class="lobby-detail-label">Описание</div>';
-        html += '<div class="lobby-detail-desc">' + L.escapeHtml(lobby.description) + '</div></div>';
+        const section = safeCreateEl('div', { className: 'lobby-detail-section' });
+        section.appendChild(safeCreateEl('div', { className: 'lobby-detail-label', textContent: 'Описание' }));
+        const descEl = safeCreateEl('div', { className: 'lobby-detail-desc' });
+        descEl.textContent = lobby.description;
+        section.appendChild(descEl);
+        container.appendChild(section);
     }
 
     if (lobby.organizer) {
         const org = lobby.organizer;
-        const avatar = org.avatar_url
-            ? '<img class="lobby-detail-org-avatar" src="' + L.escapeHtml(org.avatar_url) + '" alt="" />'
-            : '<div class="lobby-detail-org-avatar-empty"></div>';
-        html += '<div class="lobby-detail-section"><div class="lobby-detail-label">Организатор</div>';
-        html += '<div class="lobby-detail-org">' + avatar + '<div><div class="lobby-detail-org-name">' + L.escapeHtml(org.display_name || 'Без имени') + '</div>';
-        if (org.city) html += '<div class="lobby-detail-org-meta">' + L.escapeHtml(org.city) + (org.club_name ? ' · ' + L.escapeHtml(org.club_name) : '') + '</div>';
-        html += '</div></div></div>';
+        const section = safeCreateEl('div', { className: 'lobby-detail-section' });
+        section.appendChild(safeCreateEl('div', { className: 'lobby-detail-label', textContent: 'Организатор' }));
+        const orgDiv = safeCreateEl('div', { className: 'lobby-detail-org' });
+        const av = safeAvatar(org.avatar_url, 36);
+        av.className = 'lobby-detail-org-avatar';
+        orgDiv.appendChild(av);
+        const orgInfo = safeCreateEl('div');
+        orgInfo.appendChild(safeCreateEl('div', { className: 'lobby-detail-org-name', textContent: org.display_name || 'Без имени' }));
+        if (org.city) {
+            const metaText = org.club_name ? org.city + ' \u00B7 ' + org.club_name : org.city;
+            orgInfo.appendChild(safeCreateEl('div', { className: 'lobby-detail-org-meta', textContent: metaText }));
+        }
+        orgDiv.appendChild(orgInfo);
+        section.appendChild(orgDiv);
+        container.appendChild(section);
     }
 
-    html += '<div class="lobby-actions">';
-    if (lobby.can_join) html += '<button id="lobby-join-btn" class="modal-btn primary">Присоединиться</button>';
-    if (lobby.can_leave) html += '<button id="lobby-leave-btn" class="modal-btn secondary">Выйти из пробежки</button>';
-    if (lobby.viewer_role === 'organizer') html += '<button id="lobby-cancel-btn" class="modal-btn btn-cancel-lobby">Отменить пробежку</button>';
-    html += '</div>';
+    const actionsDiv = safeCreateEl('div', { className: 'lobby-actions' });
+    if (lobby.can_join) {
+        const btn = safeCreateEl('button', { id: 'lobby-join-btn', className: 'modal-btn primary', textContent: 'Присоединиться' });
+        actionsDiv.appendChild(btn);
+    }
+    if (lobby.can_leave) {
+        const btn = safeCreateEl('button', { id: 'lobby-leave-btn', className: 'modal-btn secondary', textContent: 'Выйти из пробежки' });
+        actionsDiv.appendChild(btn);
+    }
+    if (lobby.viewer_role === 'organizer') {
+        const btn = safeCreateEl('button', { id: 'lobby-cancel-btn', className: 'modal-btn btn-cancel-lobby', textContent: 'Отменить пробежку' });
+        actionsDiv.appendChild(btn);
+    }
+    if (actionsDiv.children.length > 0) container.appendChild(actionsDiv);
 
     if (participants.length > 0) {
-        html += '<div class="lobby-participants-title">Участники (' + participants.length + ')</div>';
+        container.appendChild(safeCreateEl('div', { className: 'lobby-participants-title', textContent: 'Участники (' + participants.length + ')' }));
         participants.forEach(p => {
-            const av = p.avatar_url
-                ? '<img class="lobby-participant-avatar" src="' + L.escapeHtml(p.avatar_url) + '" alt="" />'
-                : '<div class="lobby-participant-avatar-empty"></div>';
-            html += '<div class="lobby-participant">' + av
-                + '<span class="lobby-participant-name">' + L.escapeHtml(p.display_name || 'Без имени') + '</span>'
-                + '<span class="lobby-participant-role">' + L.escapeHtml(p.role === 'organizer' ? 'Организатор' : '') + '</span>'
-                + '</div>';
+            const row = safeCreateEl('div', { className: 'lobby-participant' });
+            const av = safeAvatar(p.avatar_url, 28);
+            av.className = 'lobby-participant-avatar';
+            row.appendChild(av);
+            row.appendChild(safeCreateEl('span', { className: 'lobby-participant-name', textContent: p.display_name || 'Без имени' }));
+            if (p.role === 'organizer') {
+                row.appendChild(safeCreateEl('span', { className: 'lobby-participant-role', textContent: 'Организатор' }));
+            }
+            container.appendChild(row);
         });
     }
+}
 
-    return html;
+function lobbyHandlePrivateProfile(status, detail, statusEl) {
+    if (!RunRouteLobbyUtils.isPrivateProfileError(status, detail)) return false;
+    const text = RunRouteLobbyUtils.getLobbyErrorText(status, detail);
+    lobbyShowDetailStatusHtml(text + ' __PROFILE_LINK__', true);
+    return true;
 }
 
 async function joinLobby(lobbyId) {
@@ -3188,23 +3267,14 @@ async function joinLobby(lobbyId) {
         });
         if (!resp.ok) {
             const body = await resp.json().catch(() => ({}));
-            const text = RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail);
-            if (resp.status === 400 && body.detail && body.detail.toLowerCase().includes('public')) {
-                statusEl.innerHTML = RunRouteLobbyUtils.escapeHtml(text) + ' <a href="#" id="lobby-open-profile" style="color:var(--accent)">Открыть профиль</a>';
-            } else {
-                statusEl.textContent = text;
-            }
-            statusEl.className = 'profile-status error';
-            statusEl.classList.remove('hidden');
-            const profileLink = document.getElementById('lobby-open-profile');
-            if (profileLink) profileLink.addEventListener('click', (e) => { e.preventDefault(); openProfileModal(); });
+            if (lobbyHandlePrivateProfile(resp.status, body.detail, statusEl)) return;
+            lobbyShowDetailStatus(RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail), true);
             return;
         }
-        openLobbyDetail(lobbyId);
+        await openLobbyDetail(lobbyId);
+        refreshLobbyListItem(lobbyId);
     } catch {
-        statusEl.textContent = 'Сервис временно недоступен';
-        statusEl.className = 'profile-status error';
-        statusEl.classList.remove('hidden');
+        lobbyShowDetailStatus('Сервис временно недоступен', true);
     }
 }
 
@@ -3235,16 +3305,13 @@ async function leaveLobbyAction(lobbyId) {
             });
             if (!resp.ok) {
                 const body = await resp.json().catch(() => ({}));
-                statusEl.textContent = RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail);
-                statusEl.className = 'profile-status error';
-                statusEl.classList.remove('hidden');
+                lobbyShowDetailStatus(RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail), true);
                 return;
             }
-            openLobbyDetail(lobbyId);
+            await openLobbyDetail(lobbyId);
+            refreshLobbyListItem(lobbyId);
         } catch {
-            statusEl.textContent = 'Сервис временно недоступен';
-            statusEl.className = 'profile-status error';
-            statusEl.classList.remove('hidden');
+            lobbyShowDetailStatus('Сервис временно недоступен', true);
         }
     };
 
@@ -3280,17 +3347,13 @@ async function cancelLobbyAction(lobbyId) {
             });
             if (!resp.ok) {
                 const body = await resp.json().catch(() => ({}));
-                statusEl.textContent = RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail);
-                statusEl.className = 'profile-status error';
-                statusEl.classList.remove('hidden');
+                lobbyShowDetailStatus(RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail), true);
                 return;
             }
             showLobbyList();
             loadLobbyList();
         } catch {
-            statusEl.textContent = 'Сервис временно недоступен';
-            statusEl.className = 'profile-status error';
-            statusEl.classList.remove('hidden');
+            lobbyShowDetailStatus('Сервис временно недоступен', true);
         }
     };
 
@@ -3299,12 +3362,27 @@ async function cancelLobbyAction(lobbyId) {
     confirmEl.addEventListener('click', onOverlay);
 }
 
+async function refreshLobbyListItem(lobbyId) {
+    try {
+        const resp = await fetch(apiUrl('/api/lobbies/' + lobbyId), { headers: getApiHeaders() });
+        if (!resp.ok) return;
+        const lobby = await resp.json();
+        const existing = document.querySelector('.lobby-card[data-lobby-id="' + lobbyId + '"]');
+        if (!existing) return;
+        const newCard = RunRouteLobbyUtils.renderLobbyCard(lobby, safeCreateEl, safeAvatar);
+        existing.replaceWith(newCard);
+    } catch { /* silent */ }
+}
+
 async function openLobbyCreateForm() {
     showLobbyCreate();
     lobbyMeetingPoint = null;
+    lobbyPointSource = null;
     document.getElementById('lobby-point-status').textContent = 'Точка не выбрана';
     document.getElementById('lobby-point-status').className = 'lobby-point-status';
     document.getElementById('lobby-create-status').classList.add('hidden');
+    document.getElementById('lobby-route-point-hint').classList.add('hidden');
+    document.getElementById('lobby-form-route-add-btn').classList.add('hidden');
 
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -3331,29 +3409,74 @@ async function openLobbyCreateForm() {
 
 function onLobbyRouteSelect() {
     const sel = document.getElementById('lobby-form-route');
+    const addBtn = document.getElementById('lobby-form-route-add-btn');
     const hint = document.getElementById('lobby-route-point-hint');
     if (sel.value) {
+        addBtn.classList.remove('hidden');
         hint.classList.remove('hidden');
     } else {
+        addBtn.classList.add('hidden');
         hint.classList.add('hidden');
+        if (lobbyPointSource === 'saved_route') {
+            lobbyMeetingPoint = null;
+            lobbyPointSource = null;
+            document.getElementById('lobby-point-status').textContent = 'Точка не выбрана';
+            document.getElementById('lobby-point-status').className = 'lobby-point-status';
+        }
     }
 }
 
-async function useGpsForLobby() {
+async function useRouteStartForLobby() {
+    const routeId = document.getElementById('lobby-form-route').value;
+    if (!routeId) return;
+    const el = document.getElementById('lobby-point-status');
+    el.textContent = 'Загрузка маршрута...';
+    el.className = 'lobby-point-status';
+    try {
+        const resp = await fetch(apiUrl('/api/routes/' + routeId), { headers: getApiHeaders() });
+        if (!resp.ok) throw new Error();
+        const route = await resp.json();
+        const pt = RunRouteLobbyUtils.getFirstRoutePoint(route);
+        if (!pt) {
+            el.textContent = 'Маршрут не содержит валидных точек';
+            el.className = 'lobby-point-status error';
+            return;
+        }
+        lobbyMeetingPoint = pt;
+        lobbyPointSource = 'saved_route';
+        el.textContent = 'Выбран старт маршрута';
+        el.className = 'lobby-point-status success';
+    } catch {
+        el.textContent = 'Не удалось загрузить маршрут';
+        el.className = 'lobby-point-status error';
+    }
+}
+
+function useGpsForLobby() {
+    const el = document.getElementById('lobby-point-status');
+
+    if (lastKnownLocation && (Date.now() - lastKnownLocation.timestamp < 300000)) {
+        lobbyMeetingPoint = { lat: lastKnownLocation.lat, lng: lastKnownLocation.lng };
+        lobbyPointSource = 'gps';
+        el.textContent = 'Выбрана текущая геопозиция';
+        el.className = 'lobby-point-status success';
+        return;
+    }
+
     if (!navigator.geolocation) {
-        const el = document.getElementById('lobby-point-status');
         el.textContent = 'Геолокация не поддерживается';
         el.className = 'lobby-point-status error';
         return;
     }
-    const el = document.getElementById('lobby-point-status');
+
     el.textContent = 'Определение местоположения...';
     el.className = 'lobby-point-status';
 
     navigator.geolocation.getCurrentPosition(
         (pos) => {
             lobbyMeetingPoint = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-            el.textContent = 'Точка выбрана: ' + pos.coords.latitude.toFixed(5) + ', ' + pos.coords.longitude.toFixed(5);
+            lobbyPointSource = 'gps';
+            el.textContent = 'Выбрана текущая геопозиция';
             el.className = 'lobby-point-status success';
         },
         () => {
@@ -3362,6 +3485,13 @@ async function useGpsForLobby() {
         },
         { enableHighAccuracy: true, timeout: 10000 }
     );
+}
+
+function lobbyShowCreateStatus(text) {
+    const el = document.getElementById('lobby-create-status');
+    el.textContent = text;
+    el.className = 'profile-status error';
+    el.classList.remove('hidden');
 }
 
 async function submitLobbyCreate() {
@@ -3381,63 +3511,44 @@ async function submitLobbyCreate() {
     const capacity = document.getElementById('lobby-form-capacity').value;
     const description = document.getElementById('lobby-form-desc').value.trim();
 
-    if (!title || !dateVal || !city) {
-        statusEl.textContent = 'Заполните обязательные поля: название, дата и город';
-        statusEl.className = 'profile-status error';
-        statusEl.classList.remove('hidden');
+    if (!title) { lobbyShowCreateStatus('Введите название пробежки'); return; }
+    if (!dateVal) { lobbyShowCreateStatus('Выберите дату и время'); return; }
+    if (!city) { lobbyShowCreateStatus('Введите город'); return; }
+    if (!RunRouteLobbyUtils.validateFutureDate(dateVal)) { lobbyShowCreateStatus('Дата и время должны быть в будущем'); return; }
+    if (lobbyMeetingPoint == null) { lobbyShowCreateStatus('Выберите точку встречи: геопозицию или маршрут'); return; }
+
+    if (capacity && !RunRouteLobbyUtils.validateCapacity(capacity)) {
+        lobbyShowCreateStatus('Количество участников: целое число от 2 до 100');
+        return;
+    }
+    if (distanceM && !RunRouteLobbyUtils.validateDistanceM(distanceM)) {
+        lobbyShowCreateStatus('Дистанция должна быть положительным целым числом');
+        return;
+    }
+    if (duration && !RunRouteLobbyUtils.validateDuration(duration)) {
+        lobbyShowCreateStatus('Длительность: целое число от 1 до 1440 минут');
         return;
     }
 
-    let meetingLat = null, meetingLng = null;
+    const paceMinResult = RunRouteLobbyUtils.validatePaceInput(paceMinStr);
+    if (!paceMinResult.valid) { lobbyShowCreateStatus(paceMinResult.error); return; }
+    const paceMaxResult = RunRouteLobbyUtils.validatePaceInput(paceMaxStr);
+    if (!paceMaxResult.valid) { lobbyShowCreateStatus(paceMaxResult.error); return; }
 
-    if (routeId) {
-        try {
-            const resp = await fetch(apiUrl('/api/routes/' + routeId), { headers: getApiHeaders() });
-            if (resp.ok) {
-                const route = await resp.json();
-                const pt = RunRouteLobbyUtils.getFirstRoutePoint(route);
-                if (pt) { meetingLat = pt.lat; meetingLng = pt.lng; }
-            }
-        } catch { /* silent */ }
-    }
-
-    if (lobbyMeetingPoint) {
-        meetingLat = lobbyMeetingPoint.lat;
-        meetingLng = lobbyMeetingPoint.lng;
-    }
-
-    if (meetingLat == null || meetingLng == null) {
-        statusEl.textContent = 'Выберите точку встречи: геопозицию или маршрут';
-        statusEl.className = 'profile-status error';
-        statusEl.classList.remove('hidden');
-        return;
-    }
-
-    if (!RunRouteLobbyUtils.validateFutureDate(dateVal)) {
-        statusEl.textContent = 'Дата и время должны быть в будущем';
-        statusEl.className = 'profile-status error';
-        statusEl.classList.remove('hidden');
-        return;
-    }
-
-    const paceMin = RunRouteLobbyUtils.parsePaceInput(paceMinStr);
-    const paceMax = RunRouteLobbyUtils.parsePaceInput(paceMaxStr);
-    if (paceMin != null && paceMax != null && paceMin > paceMax) {
-        statusEl.textContent = 'Минимальный темп не может быть больше максимального';
-        statusEl.className = 'profile-status error';
-        statusEl.classList.remove('hidden');
+    if (paceMinResult.value != null && paceMaxResult.value != null && paceMinResult.value > paceMaxResult.value) {
+        lobbyShowCreateStatus('Минимальный темп не может быть больше максимального');
         return;
     }
 
     const payload = RunRouteLobbyUtils.buildLobbyCreatePayload({
         title, runType,
         startsAt: new Date(dateVal).toISOString(),
-        city, meetingLat, meetingLng,
+        city, meetingLat: lobbyMeetingPoint.lat, meetingLng: lobbyMeetingPoint.lng,
         areaLabel: areaLabel || undefined,
         savedRouteId: routeId || undefined,
         distanceM: distanceM ? parseInt(distanceM) : undefined,
-        paceMin: paceMin,
-        paceMax: paceMax,
+        paceMin: paceMinResult.value,
+        paceMax: paceMaxResult.value,
         durationMinutes: duration ? parseInt(duration) : undefined,
         capacity: capacity ? parseInt(capacity) : undefined,
         description: description || undefined,
@@ -3452,25 +3563,31 @@ async function submitLobbyCreate() {
             method: 'POST', headers: getApiHeaders(),
             body: JSON.stringify(payload)
         });
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Создать';
-
         if (!resp.ok) {
             const body = await resp.json().catch(() => ({}));
-            statusEl.textContent = RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail);
-            statusEl.className = 'profile-status error';
-            statusEl.classList.remove('hidden');
+            if (RunRouteLobbyUtils.isPrivateProfileError(resp.status, body.detail)) {
+                const text = RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail);
+                lobbyShowCreateStatus(text + ' \u2014 ');
+                const statusEl2 = document.getElementById('lobby-create-status');
+                const link = document.createElement('a');
+                link.href = '#';
+                link.textContent = 'Открыть профиль';
+                link.style.color = 'var(--accent)';
+                link.addEventListener('click', (e) => { e.preventDefault(); openProfileModal(); });
+                statusEl2.appendChild(link);
+                return;
+            }
+            lobbyShowCreateStatus(RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail));
             return;
         }
         const lobby = await resp.json();
         loadLobbyList();
         openLobbyDetail(lobby.id);
     } catch {
+        lobbyShowCreateStatus('Сервис временно недоступен');
+    } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Создать';
-        statusEl.textContent = 'Сервис временно недоступен';
-        statusEl.className = 'profile-status error';
-        statusEl.classList.remove('hidden');
     }
 }
 
