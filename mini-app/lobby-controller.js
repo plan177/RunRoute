@@ -758,7 +758,7 @@
     function useGpsForLobby() {
         var el = _el('lobby-point-status');
 
-        // 1. Fresh lastKnownLocation
+        // 1. Fresh lastKnownLocation (synchronous, no busy needed)
         if (lastKnownLocation && (Date.now() - lastKnownLocation.timestamp < 300000)) {
             var ll = lastKnownLocation;
             if (RunRouteLobbyUtils.lobbyCoordsValid(ll.lat, ll.lng)) {
@@ -770,17 +770,19 @@
             }
         }
 
+        // 2-3. Async GPS acquisition - block parallel calls
+        if (_lobbyLocationManagerBusy) return;
+        _lobbyLocationManagerBusy = true;
+
+        function _gpsDone() { _lobbyLocationManagerBusy = false; }
+
+        el.textContent = '\u041e\u043f\u0440\u0435\u0434\u0435\u043b\u0435\u043d\u0438\u0435 \u043c\u0435\u0441\u0442\u043e\u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u044f...';
+        el.className = 'lobby-point-status';
+
         // 2. Telegram LocationManager
         var tgApp = window.Telegram && window.Telegram.WebApp;
         var lm = tgApp && tgApp.LocationManager;
         if (lm) {
-            if (_lobbyLocationManagerBusy) return;
-            _lobbyLocationManagerBusy = true;
-            el.textContent = '\u041e\u043f\u0440\u0435\u0434\u0435\u043b\u0435\u043d\u0438\u0435 \u043c\u0435\u0441\u0442\u043e\u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u044f...';
-            el.className = 'lobby-point-status';
-
-            function _gpsDone() { _lobbyLocationManagerBusy = false; }
-
             var onLocation = function (locationData) {
                 if (!locationData) {
                     _useBrowserGeolocation(el, _gpsDone);
@@ -794,7 +796,7 @@
                 }
                 lobbyMeetingPoint = { lat: lat, lng: lng };
                 lobbyPointSource = 'gps';
-                el.textContent = '\u0412\u044b\u0431\u0430\u043d\u0430 \u0442\u0435\u043a\u0443\u0449\u0430\u044f \u0433\u0435\u043e\u043f\u043e\u0437\u0438\u0446\u0438\u044f';
+                el.textContent = '\u0412\u044b\u0431\u0440\u0430\u043d\u0430 \u0442\u0435\u043a\u0443\u0449\u0430\u044f \u0433\u0435\u043e\u043f\u043e\u0437\u0438\u0446\u0438\u044f';
                 el.className = 'lobby-point-status success';
                 _gpsDone();
             };
@@ -812,8 +814,7 @@
         }
 
         // 3. Browser geolocation fallback
-        _lobbyLocationManagerBusy = true;
-        _useBrowserGeolocation(el, function () { _lobbyLocationManagerBusy = false; });
+        _useBrowserGeolocation(el, _gpsDone);
     }
 
     // --- Panel open/close ---

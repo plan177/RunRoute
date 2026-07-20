@@ -798,4 +798,29 @@ describe('GPS busy lifecycle via useGpsForLobby', () => {
         lobby.useGpsForLobby();
         assert.ok(capturedCb !== null, 'should be able to call again');
     });
+
+    it('direct browser fallback blocks duplicate clicks', () => {
+        let geoCount = 0;
+        const { lobby } = createLobbyControllerVM(defaultFetch(), {
+            navigator: { geolocation: { getCurrentPosition() { geoCount++; } } },
+        });
+        // No Telegram LM -> goes directly to browser fallback
+
+        lobby.useGpsForLobby();
+        lobby.useGpsForLobby();
+        assert.equal(geoCount, 1, 'getCurrentPosition called once');
+    });
+
+    it('lastKnownLocation does not leave busy set', () => {
+        const { lobby } = createLobbyControllerVM(defaultFetch(), {
+            navigator: { geolocation: null },
+            lastKnownLocation: { lat: 55.75, lng: 37.62, timestamp: Date.now() },
+        });
+
+        lobby.useGpsForLobby();
+        assert.ok(lobby.lobbyMeetingPoint, 'meeting point set');
+        // Calling again should also succeed (busy not left set)
+        lobby.useGpsForLobby();
+        assert.ok(lobby.lobbyMeetingPoint, 'still works after second call');
+    });
 });
