@@ -288,6 +288,7 @@
             var participants = [];
             if (participantsResp.ok) {
                 var pData = await participantsResp.json();
+                if (myToken !== lobbyDetailRequestToken) return;
                 participants = pData.participants || [];
             }
             var contentEl = _el('lobby-detail-content');
@@ -354,6 +355,7 @@
                 var participants = [];
                 if (participantsResp.ok) {
                     var pData = await participantsResp.json();
+                    if (myToken !== lobbyDetailRequestToken) return;
                     participants = pData.participants || [];
                 }
                 var contentEl = _el('lobby-detail-content');
@@ -587,6 +589,7 @@
                 return;
             }
             var data = await resp.json();
+            if (token !== lobbyRequestToken) return;
             var items = data.items || [];
             lobbyNextCursor = data.next_cursor || null;
 
@@ -824,6 +827,8 @@
         _el('lobby-panel').classList.add('hidden');
         lobbyNextCursor = null;
         lobbyShownIds.clear();
+        ++lobbyRequestToken;
+        ++lobbyDetailRequestToken;
     }
 
     // --- Public API ---
@@ -831,6 +836,7 @@
         // State accessors (for tests)
         get lobbyBusyActions() { return lobbyBusyActions; },
         get lobbyDetailRequestToken() { return lobbyDetailRequestToken; },
+        get lobbyRequestToken() { return lobbyRequestToken; },
         get lobbyMeetingPoint() { return lobbyMeetingPoint; },
         get lobbyPointSource() { return lobbyPointSource; },
         lobbyIsBusy: lobbyIsBusy,
@@ -865,5 +871,8 @@
         lobbyShowCreateStatus: lobbyShowCreateStatus,
         lobbyShowStatus: lobbyShowStatus,
         _useBrowserGeolocation: _useBrowserGeolocation,
+
+        // Test helpers
+        get _vmCtx() { return null; }, // placeholder, real ctx injected by VM
     };
 });
