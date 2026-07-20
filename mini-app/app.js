@@ -3115,6 +3115,8 @@ function lobbyShowDetailStatusHtml(html, isError) {
     el.classList.remove('hidden');
 }
 
+let lobbyDetailRequestToken = 0;
+
 async function openLobbyDetail(lobbyId) {
     showLobbyDetail();
     const contentEl = document.getElementById('lobby-detail-content');
@@ -3126,11 +3128,14 @@ async function openLobbyDetail(lobbyId) {
     contentEl.classList.add('hidden');
     statusEl.classList.add('hidden');
 
+    const token = ++lobbyDetailRequestToken;
+
     try {
         const [lobbyResp, participantsResp] = await Promise.all([
             fetch(apiUrl('/api/lobbies/' + lobbyId), { headers: getApiHeaders() }),
             fetch(apiUrl('/api/lobbies/' + lobbyId + '/participants'), { headers: getApiHeaders() })
         ]);
+        if (token !== lobbyDetailRequestToken) return;
         loadingEl.classList.add('hidden');
         if (!lobbyResp.ok) {
             lobbyShowDetailStatus(RunRouteLobbyUtils.getLobbyErrorText(lobbyResp.status), true);
@@ -3144,6 +3149,7 @@ async function openLobbyDetail(lobbyId) {
             participants = pData.participants || [];
         }
 
+        if (token !== lobbyDetailRequestToken) return;
         contentEl.innerHTML = '';
         buildLobbyDetailDom(contentEl, lobby, participants);
         contentEl.classList.remove('hidden');
@@ -3156,6 +3162,7 @@ async function openLobbyDetail(lobbyId) {
         if (leaveBtn) leaveBtn.addEventListener('click', () => leaveLobbyAction(lobbyId));
         if (cancelBtn) cancelBtn.addEventListener('click', () => cancelLobbyAction(lobbyId));
     } catch {
+        if (token !== lobbyDetailRequestToken) return;
         loadingEl.classList.add('hidden');
         lobbyShowDetailStatus('Сервис временно недоступен', true);
     }
@@ -3273,6 +3280,7 @@ async function joinLobby(lobbyId) {
     lobbySetBusy('join');
     const statusEl = document.getElementById('lobby-detail-status');
     statusEl.classList.add('hidden');
+    const myToken = lobbyDetailRequestToken;
     try {
         const resp = await fetch(apiUrl('/api/lobbies/' + lobbyId + '/join'), {
             method: 'POST', headers: getApiHeaders()
@@ -3283,9 +3291,11 @@ async function joinLobby(lobbyId) {
             lobbyShowDetailStatus(RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail), true);
             return;
         }
+        if (myToken !== lobbyDetailRequestToken) return;
         const lobbyResp = await fetch(apiUrl('/api/lobbies/' + lobbyId), { headers: getApiHeaders() });
         if (lobbyResp.ok) {
             const lobby = await lobbyResp.json();
+            if (myToken !== lobbyDetailRequestToken) return;
             const participantsResp = await fetch(apiUrl('/api/lobbies/' + lobbyId + '/participants'), { headers: getApiHeaders() });
             let participants = [];
             if (participantsResp.ok) {
@@ -3312,7 +3322,9 @@ async function joinLobby(lobbyId) {
 }
 
 async function leaveLobbyAction(lobbyId) {
-    if (lobbyIsBusy('leave')) return;
+    const busyKey = 'leave:' + lobbyId;
+    if (lobbyIsBusy(busyKey)) return;
+    lobbySetBusy(busyKey);
     const statusEl = document.getElementById('lobby-detail-status');
     statusEl.classList.add('hidden');
     const confirmEl = document.getElementById('confirm-modal');
@@ -3328,12 +3340,14 @@ async function leaveLobbyAction(lobbyId) {
         yesBtn.removeEventListener('click', onYes);
         noBtn.removeEventListener('click', onNo);
         confirmEl.removeEventListener('click', onOverlay);
+        lobbyClearBusy(busyKey);
     };
     const onNo = () => cleanup();
     const onOverlay = (e) => { if (e.target === confirmEl) cleanup(); };
     const onYes = async () => {
         cleanup();
-        lobbySetBusy('leave');
+        lobbySetBusy(busyKey);
+        const myToken = lobbyDetailRequestToken;
         try {
             const resp = await fetch(apiUrl('/api/lobbies/' + lobbyId + '/leave'), {
                 method: 'POST', headers: getApiHeaders()
@@ -3343,9 +3357,11 @@ async function leaveLobbyAction(lobbyId) {
                 lobbyShowDetailStatus(RunRouteLobbyUtils.getLobbyErrorText(resp.status, body.detail), true);
                 return;
             }
+            if (myToken !== lobbyDetailRequestToken) return;
             const lobbyResp = await fetch(apiUrl('/api/lobbies/' + lobbyId), { headers: getApiHeaders() });
             if (lobbyResp.ok) {
                 const lobby = await lobbyResp.json();
+                if (myToken !== lobbyDetailRequestToken) return;
                 const participantsResp = await fetch(apiUrl('/api/lobbies/' + lobbyId + '/participants'), { headers: getApiHeaders() });
                 let participants = [];
                 if (participantsResp.ok) {
@@ -3367,7 +3383,7 @@ async function leaveLobbyAction(lobbyId) {
         } catch {
             lobbyShowDetailStatus('Сервис временно недоступен', true);
         } finally {
-            lobbyClearBusy('leave');
+            lobbyClearBusy(busyKey);
         }
     };
 
@@ -3377,7 +3393,9 @@ async function leaveLobbyAction(lobbyId) {
 }
 
 async function cancelLobbyAction(lobbyId) {
-    if (lobbyIsBusy('cancel')) return;
+    const busyKey = 'cancel:' + lobbyId;
+    if (lobbyIsBusy(busyKey)) return;
+    lobbySetBusy(busyKey);
     const statusEl = document.getElementById('lobby-detail-status');
     statusEl.classList.add('hidden');
     const confirmEl = document.getElementById('confirm-modal');
@@ -3393,12 +3411,13 @@ async function cancelLobbyAction(lobbyId) {
         yesBtn.removeEventListener('click', onYes);
         noBtn.removeEventListener('click', onNo);
         confirmEl.removeEventListener('click', onOverlay);
+        lobbyClearBusy(busyKey);
     };
     const onNo = () => cleanup();
     const onOverlay = (e) => { if (e.target === confirmEl) cleanup(); };
     const onYes = async () => {
         cleanup();
-        lobbySetBusy('cancel');
+        lobbySetBusy(busyKey);
         try {
             const resp = await fetch(apiUrl('/api/lobbies/' + lobbyId + '/cancel'), {
                 method: 'POST', headers: getApiHeaders()
@@ -3413,7 +3432,7 @@ async function cancelLobbyAction(lobbyId) {
         } catch {
             lobbyShowDetailStatus('Сервис временно недоступен', true);
         } finally {
-            lobbyClearBusy('cancel');
+            lobbyClearBusy(busyKey);
         }
     };
 
@@ -3530,6 +3549,8 @@ async function useRouteStartForLobby() {
     }
 }
 
+let _lobbyLocationManagerBusy = false;
+
 function useGpsForLobby() {
     const el = document.getElementById('lobby-point-status');
 
@@ -3546,28 +3567,40 @@ function useGpsForLobby() {
     }
 
     // 2. Telegram LocationManager
-    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.LocationManager) {
+    const tgApp = window.Telegram && window.Telegram.WebApp;
+    const lm = tgApp && tgApp.LocationManager;
+    if (lm) {
+        if (_lobbyLocationManagerBusy) return;
+        _lobbyLocationManagerBusy = true;
         el.textContent = 'Определение местоположения...';
         el.className = 'lobby-point-status';
+
+        const onLocation = (locationData) => {
+            _lobbyLocationManagerBusy = false;
+            if (!locationData) {
+                _useBrowserGeolocation(el);
+                return;
+            }
+            const lat = locationData.latitude;
+            const lng = locationData.longitude;
+            if (lat == null || lng == null || !RunRouteLobbyUtils.lobbyCoordsValid(lat, lng)) {
+                _useBrowserGeolocation(el);
+                return;
+            }
+            lobbyMeetingPoint = { lat, lng };
+            lobbyPointSource = 'gps';
+            el.textContent = 'Выбрана текущая геопозиция';
+            el.className = 'lobby-point-status success';
+        };
+
         try {
-            window.Telegram.WebApp.LocationManager.getLocation((err, location) => {
-                if (err || !location) {
-                    // 3. Fallback to browser geolocation
-                    _useBrowserGeolocation(el);
-                    return;
-                }
-                const lat = location.latitude != null ? location.latitude : (location.lat != null ? location.lat : null);
-                const lng = location.longitude != null ? location.longitude : (location.lng != null ? location.lng : null);
-                if (lat == null || lng == null || !RunRouteLobbyUtils.lobbyCoordsValid(lat, lng)) {
-                    _useBrowserGeolocation(el);
-                    return;
-                }
-                lobbyMeetingPoint = { lat, lng };
-                lobbyPointSource = 'gps';
-                el.textContent = 'Выбрана текущая геопозиция';
-                el.className = 'lobby-point-status success';
-            });
+            if (lm.isInited) {
+                lm.getLocation(onLocation);
+            } else {
+                lm.init(() => { lm.getLocation(onLocation); });
+            }
         } catch {
+            _lobbyLocationManagerBusy = false;
             _useBrowserGeolocation(el);
         }
         return;
@@ -3718,7 +3751,7 @@ async function submitLobbyCreate() {
         resetLobbyCreateForm();
         showLobbyList();
         await loadLobbyList();
-        openLobbyDetail(lobby.id);
+        await openLobbyDetail(lobby.id);
     } catch {
         lobbyShowCreateStatus('Сервис временно недоступен');
     } finally {
