@@ -2469,8 +2469,12 @@ function safeAvatar(url, size) {
     const wrap = safeCreateEl('div', { className: 'follow-list-avatar-placeholder' });
     safeSetText(wrap, '\u{1F3C3}');
     if (!url) return wrap;
-    const parsed = new URL(url, location.href);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return wrap;
+    try {
+        const parsed = new URL(url, location.href);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return wrap;
+    } catch {
+        return wrap;
+    }
     const img = safeCreateEl('img', {
         src: url,
         alt: '',
@@ -2909,6 +2913,32 @@ function initFollowList() {
     loadMoreBtn.addEventListener('click', loadFollowPage);
 }
 
+// === Lobby (delegated to lobby-controller.js) ===
+
+function initLobby() {
+    var L = RunRouteLobby;
+    document.getElementById('menu-lobby').addEventListener('click', function () {
+        document.getElementById('user-menu').classList.add('hidden');
+        L.openLobbyPanel();
+    });
+    document.getElementById('lobby-close-btn').addEventListener('click', function () { L.closeLobbyPanel(); });
+    document.getElementById('lobby-create-btn').addEventListener('click', function () { L.openLobbyCreateForm(); });
+    document.getElementById('lobby-back-btn').addEventListener('click', function () { L.showLobbyList(); });
+    document.getElementById('lobby-create-back-btn').addEventListener('click', function () { L.showLobbyList(); });
+    document.getElementById('lobby-create-cancel').addEventListener('click', function () { L.showLobbyList(); });
+    document.getElementById('lobby-filter-apply').addEventListener('click', function () { L.applyLobbyFilters(); });
+    document.getElementById('lobby-filter-reset').addEventListener('click', function () { L.resetLobbyFilters(); });
+    document.getElementById('lobby-list-load-more-btn').addEventListener('click', function () { L.loadMoreLobbies(); });
+    document.getElementById('lobby-create-submit').addEventListener('click', function () { L.submitLobbyCreate(); });
+    document.getElementById('lobby-use-gps-btn').addEventListener('click', function () { L.useGpsForLobby(); });
+    document.getElementById('lobby-list-items').addEventListener('click', function (e) {
+        var card = e.target.closest('.lobby-card');
+        if (card) L.openLobbyDetail(card.dataset.lobbyId);
+    });
+    document.getElementById('lobby-form-route').addEventListener('change', function () { L.onLobbyRouteSelect(); });
+    document.getElementById('lobby-form-route-add-btn').addEventListener('click', function () { L.useRouteStartForLobby(); });
+}
+
 // === Init all ===
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -2929,6 +2959,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initGPS();
     initPublicProfile();
     initFollowList();
+    initLobby();
     loadCurrentUser();
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);

@@ -31,6 +31,7 @@
                 <div id="user-menu" class="user-menu hidden">
                     <button id="menu-profile" class="menu-item" aria-label="Профиль">Профиль</button>
                     <button id="menu-calendar" class="menu-item" aria-label="Календарь">Календарь</button>
+                    <button id="menu-lobby" class="menu-item" aria-label="Совместные пробежки">Совместные пробежки</button>
                     <button id="menu-feedback" class="menu-item" aria-label="Обратная связь">Обратная связь</button>
                 </div>
             </div>
@@ -597,12 +598,166 @@
         </div>
     </div>
 
+    <div id="lobby-panel" class="lobby-panel hidden">
+        <div class="lobby-panel-header">
+            <h2 class="lobby-panel-title">Совместные пробежки</h2>
+            <button id="lobby-close-btn" class="lobby-close-btn" aria-label="Закрыть">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+
+        <div id="lobby-list-view">
+            <button id="lobby-create-btn" class="btn-primary" style="width:100%;margin-bottom:12px;">Создать пробежку</button>
+
+            <div class="lobby-filters">
+                <div class="profile-field">
+                    <label for="lobby-filter-city">Город</label>
+                    <input type="text" id="lobby-filter-city" maxlength="100" placeholder="Все города" />
+                </div>
+                <div class="profile-field">
+                    <label for="lobby-filter-type">Тип пробежки</label>
+                    <select id="lobby-filter-type">
+                        <option value="">Все типы</option>
+                        <option value="easy">Лёгкая</option>
+                        <option value="recovery">Восстановительная</option>
+                        <option value="long">Длительная</option>
+                        <option value="tempo">Темповая</option>
+                        <option value="intervals">Интервалы</option>
+                        <option value="hills">Горки</option>
+                        <option value="trail">Трейл</option>
+                        <option value="other">Другая</option>
+                    </select>
+                </div>
+                <div class="profile-field">
+                    <label for="lobby-filter-period">Период</label>
+                    <select id="lobby-filter-period">
+                        <option value="7">Ближайшие 7 дней</option>
+                        <option value="">Все будущие</option>
+                    </select>
+                </div>
+                <div class="lobby-filter-actions">
+                    <button id="lobby-filter-apply" class="modal-btn primary">Применить</button>
+                    <button id="lobby-filter-reset" class="modal-btn secondary">Сбросить</button>
+                </div>
+            </div>
+
+            <div id="lobby-list-loading" class="profile-loading">
+                <div class="skeleton skeleton-line"></div>
+                <div class="skeleton skeleton-line short"></div>
+                <div class="skeleton skeleton-line"></div>
+            </div>
+            <div id="lobby-list-items"></div>
+            <div id="lobby-list-empty" class="lobby-empty hidden">Нет будущих пробежек</div>
+            <div id="lobby-list-load-more" class="hidden">
+                <button id="lobby-list-load-more-btn" class="modal-btn secondary">Показать ещё</button>
+            </div>
+            <div id="lobby-list-status" class="profile-status hidden"></div>
+        </div>
+
+        <div id="lobby-detail-view" class="hidden">
+            <button id="lobby-back-btn" class="lobby-back-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                Назад к списку
+            </button>
+            <div id="lobby-detail-loading" class="profile-loading">
+                <div class="skeleton skeleton-line"></div>
+                <div class="skeleton skeleton-line short"></div>
+            </div>
+            <div id="lobby-detail-content" class="hidden"></div>
+            <div id="lobby-detail-status" class="profile-status hidden"></div>
+        </div>
+
+        <div id="lobby-create-view" class="hidden">
+            <button id="lobby-create-back-btn" class="lobby-back-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                Назад
+            </button>
+            <p class="lobby-panel-subtitle">Новая совместная пробежка</p>
+
+            <div class="profile-field">
+                <label for="lobby-form-title">Название *</label>
+                <input type="text" id="lobby-form-title" maxlength="100" placeholder="Утренняя пробежка" />
+            </div>
+            <div class="profile-field">
+                <label for="lobby-form-type">Тип пробежки *</label>
+                <select id="lobby-form-type">
+                    <option value="easy">Лёгкая</option>
+                    <option value="recovery">Восстановительная</option>
+                    <option value="long">Длительная</option>
+                    <option value="tempo">Темповая</option>
+                    <option value="intervals">Интервалы</option>
+                    <option value="hills">Горки</option>
+                    <option value="trail">Трейл</option>
+                    <option value="other">Другая</option>
+                </select>
+            </div>
+            <div class="profile-field">
+                <label for="lobby-form-date">Дата и время *</label>
+                <input type="datetime-local" id="lobby-form-date" />
+            </div>
+            <div class="profile-field">
+                <label for="lobby-form-city">Город *</label>
+                <input type="text" id="lobby-form-city" maxlength="100" placeholder="Москва" />
+            </div>
+            <div class="profile-field">
+                <label>Точка встречи *</label>
+                <div class="lobby-point-status" id="lobby-point-status">Точка не выбрана</div>
+                <div class="lobby-point-actions">
+                    <button type="button" id="lobby-use-gps-btn" class="modal-btn secondary">Использовать мою геопозицию</button>
+                </div>
+            </div>
+            <div class="profile-field">
+                <label for="lobby-form-area">Район / описание места</label>
+                <input type="text" id="lobby-form-area" maxlength="150" placeholder="Парк Горького, вход у стартовой арки" />
+            </div>
+            <div class="profile-field">
+                <label for="lobby-form-route">Сохранённый маршрут</label>
+                <select id="lobby-form-route"><option value="">Без маршрута</option></select>
+                <div id="lobby-route-point-hint" class="field-hint hidden">Нажмите «Использовать старт маршрута» чтобы выбрать стартовую точку</div>
+                <button type="button" id="lobby-form-route-add-btn" class="modal-btn secondary hidden" style="margin-top:6px;width:100%;">Использовать старт маршрута</button>
+            </div>
+            <div class="profile-field">
+                <label for="lobby-form-distance">Дистанция (м)</label>
+                <input type="number" id="lobby-form-distance" min="1" placeholder="опционально" />
+            </div>
+            <div class="lobby-pace-row">
+                <div class="profile-field" style="flex:1">
+                    <label for="lobby-form-pace-min">Мин. темп</label>
+                    <input type="text" id="lobby-form-pace-min" placeholder="5:00" />
+                </div>
+                <div class="profile-field" style="flex:1">
+                    <label for="lobby-form-pace-max">Макс. темп</label>
+                    <input type="text" id="lobby-form-pace-max" placeholder="7:00" />
+                </div>
+            </div>
+            <div class="profile-field">
+                <label for="lobby-form-duration">Длительность (мин)</label>
+                <input type="number" id="lobby-form-duration" min="1" max="1440" placeholder="опционально" />
+            </div>
+            <div class="profile-field">
+                <label for="lobby-form-capacity">Количество участников</label>
+                <input type="number" id="lobby-form-capacity" min="2" max="100" value="10" />
+            </div>
+            <div class="profile-field">
+                <label for="lobby-form-desc">Описание</label>
+                <textarea id="lobby-form-desc" maxlength="2000" rows="3" placeholder="Дополнительная информация"></textarea>
+            </div>
+            <div id="lobby-create-status" class="profile-status hidden"></div>
+            <div class="modal-actions">
+                <button id="lobby-create-submit" class="modal-btn primary">Создать</button>
+                <button id="lobby-create-cancel" class="modal-btn secondary">Отмена</button>
+            </div>
+        </div>
+    </div>
+
     <script src="config.js"></script>
     <script src="route-utils.js"></script>
     <script src="pace-utils.js"></script>
     <script src="mode-utils.js"></script>
     <script src="calendar-utils.js"></script>
     <script src="public-profile-utils.js"></script>
+    <script src="lobby-utils.js"></script>
+    <script src="lobby-controller.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
