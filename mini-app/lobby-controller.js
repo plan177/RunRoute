@@ -716,10 +716,11 @@
     }
 
     // --- GPS ---
-    function _useBrowserGeolocation(el) {
+    function _useBrowserGeolocation(el, onComplete) {
         if (!navigator.geolocation) {
             el.textContent = '\u0413\u0435\u043e\u043b\u043e\u043a\u0430\u0446\u0438\u044f \u043d\u0435 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044f';
             el.className = 'lobby-point-status error';
+            if (onComplete) onComplete();
             return;
         }
         el.textContent = '\u041e\u043f\u0440\u0435\u0434\u0435\u043b\u0435\u043d\u0438\u0435 \u043c\u0435\u0441\u0442\u043e\u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u044f...';
@@ -730,12 +731,14 @@
                 if (!RunRouteLobbyUtils.lobbyCoordsValid(lat, lng)) {
                     el.textContent = '\u041f\u043e\u043b\u0443\u0447\u0435\u043d\u044b \u043d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0435 \u043a\u043e\u043e\u0440\u0434\u0438\u043d\u0430\u0442\u044b';
                     el.className = 'lobby-point-status error';
+                    if (onComplete) onComplete();
                     return;
                 }
                 lobbyMeetingPoint = { lat: lat, lng: lng };
                 lobbyPointSource = 'gps';
                 el.textContent = '\u0412\u044b\u0431\u0440\u0430\u043d\u0430 \u0442\u0435\u043a\u0443\u0449\u0430\u044f \u0433\u0435\u043e\u043f\u043e\u0437\u0438\u0446\u0438\u044f';
                 el.className = 'lobby-point-status success';
+                if (onComplete) onComplete();
             },
             function (err) {
                 if (err.code === 1) {
@@ -746,6 +749,7 @@
                     el.textContent = '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0438\u0442\u044c \u043c\u0435\u0441\u0442\u043e\u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u0435';
                 }
                 el.className = 'lobby-point-status error';
+                if (onComplete) onComplete();
             },
             { enableHighAccuracy: true, timeout: 10000 }
         );
@@ -775,22 +779,24 @@
             el.textContent = '\u041e\u043f\u0440\u0435\u0434\u0435\u043b\u0435\u043d\u0438\u0435 \u043c\u0435\u0441\u0442\u043e\u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u044f...';
             el.className = 'lobby-point-status';
 
+            function _gpsDone() { _lobbyLocationManagerBusy = false; }
+
             var onLocation = function (locationData) {
-                _lobbyLocationManagerBusy = false;
                 if (!locationData) {
-                    _useBrowserGeolocation(el);
+                    _useBrowserGeolocation(el, _gpsDone);
                     return;
                 }
                 var lat = locationData.latitude;
                 var lng = locationData.longitude;
                 if (lat == null || lng == null || !RunRouteLobbyUtils.lobbyCoordsValid(lat, lng)) {
-                    _useBrowserGeolocation(el);
+                    _useBrowserGeolocation(el, _gpsDone);
                     return;
                 }
                 lobbyMeetingPoint = { lat: lat, lng: lng };
                 lobbyPointSource = 'gps';
-                el.textContent = '\u0412\u044b\u0431\u0440\u0430\u043d\u0430 \u0442\u0435\u043a\u0443\u0449\u0430\u044f \u0433\u0435\u043e\u043f\u043e\u0437\u0438\u0446\u0438\u044f';
+                el.textContent = '\u0412\u044b\u0431\u0430\u043d\u0430 \u0442\u0435\u043a\u0443\u0449\u0430\u044f \u0433\u0435\u043e\u043f\u043e\u0437\u0438\u0446\u0438\u044f';
                 el.className = 'lobby-point-status success';
+                _gpsDone();
             };
 
             try {
@@ -800,14 +806,14 @@
                     lm.init(function () { lm.getLocation(onLocation); });
                 }
             } catch (e) {
-                _lobbyLocationManagerBusy = false;
-                _useBrowserGeolocation(el);
+                _useBrowserGeolocation(el, _gpsDone);
             }
             return;
         }
 
         // 3. Browser geolocation fallback
-        _useBrowserGeolocation(el);
+        _lobbyLocationManagerBusy = true;
+        _useBrowserGeolocation(el, function () { _lobbyLocationManagerBusy = false; });
     }
 
     // --- Panel open/close ---
@@ -839,6 +845,7 @@
         get lobbyRequestToken() { return lobbyRequestToken; },
         get lobbyMeetingPoint() { return lobbyMeetingPoint; },
         get lobbyPointSource() { return lobbyPointSource; },
+        get lobbyNextCursor() { return lobbyNextCursor; },
         lobbyIsBusy: lobbyIsBusy,
         lobbySetBusy: lobbySetBusy,
         lobbyClearBusy: lobbyClearBusy,

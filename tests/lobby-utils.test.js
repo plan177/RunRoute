@@ -198,10 +198,7 @@ function errFetch(status, body) {
 describe('LocationManager via useGpsForLobby', () => {
     it('Telegram success sets meeting point', () => {
         let capturedCb = null;
-        const fakeLm = {
-            isInited: true,
-            getLocation(cb) { capturedCb = cb; },
-        };
+        const fakeLm = { isInited: true, getLocation(cb) { capturedCb = cb; } };
         const { lobby, ctx } = createLobbyControllerVM(defaultFetch(), {
             navigator: { geolocation: null },
         });
@@ -344,40 +341,225 @@ describe('cancel/overlay frees busy via production leaveLobbyAction', () => {
 
 describe('double submitLobbyCreate via production', () => {
     it('busy guard prevents double POST', async () => {
-        const fetchMock = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
-        const { lobby } = createLobbyControllerVM(fetchMock);
+        let postCount = 0;
+        const fetchMock = (url, opts) => {
+            if (opts && opts.method === 'POST' && url === '/api/lobbies') {
+                postCount++;
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: '1' }) });
+            }
+            if (url.includes('/participants')) {
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ participants: [] }) });
+            }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: '1', title: 'T', route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, organizer: { display_name: 'Org' } }) });
+        };
 
-        // Test busy guard directly via production functions
-        lobby.lobbySetBusy('create');
-        assert.ok(lobby.lobbyIsBusy('create'));
-        lobby.lobbyClearBusy('create');
-        assert.ok(!lobby.lobbyIsBusy('create'));
+        const futureDate = new Date(Date.now() + 86400000);
+        const dateStr = futureDate.toISOString().slice(0, 16);
+
+        const { lobby, doc } = createLobbyControllerVM(fetchMock, {
+            lastKnownLocation: { lat: 55.75, lng: 37.62, timestamp: Date.now() },
+        });
+
+        lobby.useGpsForLobby();
+        assert.ok(lobby.lobbyMeetingPoint, 'meeting point should be set');
+
+        doc.getElementById('lobby-form-title').value = 'Test Lobby';
+        doc.getElementById('lobby-form-date').value = dateStr;
+        doc.getElementById('lobby-form-city').value = 'Moscow';
+
+        const p1 = lobby.submitLobbyCreate();
+        const p2 = lobby.submitLobbyCreate();
+        await Promise.all([p1, p2]);
+
+        assert.equal(postCount, 1, 'should send exactly one POST /api/lobbies');
+    });
+
+    it('busy freed after rejected fetch, resubmission possible', async () => {
+        let postCount = 0;
+        const fetchMock = (url, opts) => {
+            if (opts && opts.method === 'POST' && url === '/api/lobbies') {
+                postCount++;
+                return Promise.reject(new Error('network'));
+            }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        };
+
+        const futureDate = new Date(Date.now() + 86400000);
+        const dateStr = futureDate.toISOString().slice(0, 16);
+
+        const { lobby, doc } = createLobbyControllerVM(fetchMock, {
+            lastKnownLocation: { lat: 55.75, lng: 37.62, timestamp: Date.now() },
+        });
+
+        lobby.useGpsForLobby();
+        doc.getElementById('lobby-form-title').value = 'Test Lobby';
+        doc.getElementById('lobby-form-date').value = dateStr;
+        doc.getElementById('lobby-form-city').value = 'Moscow';
+
+        await lobby.submitLobbyCreate();
+        assert.ok(!lobby.lobbyIsBusy('create'), 'busy should be cleared after error');
+        assert.equal(postCount, 1);
+
+        await lobby.submitLobbyCreate();
+        assert.equal(postCount, 2, 'should be able to resubmit after error');
     });
 });
 
 describe('detail staleness via production loadLobbyList', () => {
-    it('later request invalidates earlier', async () => {
-        let requestCount = 0;
+    it('stale response does not overwrite newer result', async () => {
+        let resolveFirst, resolveSecond;
+        let callCount = 0;
         const fetchMock = () => {
-            requestCount++;
-            const myCount = requestCount;
-            return new Promise(resolve => {
-                setTimeout(() => {
-                    resolve({ ok: true, status: 200, json: () => Promise.resolve({ items: [{ id: 'r' + myCount, title: 'T' + myCount, route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, organizer: { display_name: 'Org' } }] }) });
-                }, myCount === 1 ? 50 : 10);
-            });
+            callCount++;
+            if (callCount === 1) return new Promise(r => { resolveFirst = r; });
+            return new Promise(r => { resolveSecond = r; });
         };
+
         const { lobby, doc } = createLobbyControllerVM(fetchMock);
 
         const p1 = lobby.loadLobbyList(false, '');
         const p2 = lobby.loadLobbyList(false, '');
 
+        resolveSecond({
+            ok: true, status: 200,
+            json: () => Promise.resolve({
+                items: [{ id: 'new', title: 'New', route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, organizer: { display_name: 'Org' } }],
+                next_cursor: 'cursor-new'
+            })
+        });
+
+        await new Promise(r => setTimeout(r, 10));
+
+        resolveFirst({
+            ok: true, status: 200,
+            json: () => Promise.resolve({
+                items: [{ id: 'old', title: 'Old', route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, organizer: { display_name: 'Org' } }],
+                next_cursor: 'cursor-old'
+            })
+        });
+
         await Promise.all([p1, p2]);
 
-        // Elements created by _el() inside loadLobbyList
         const itemsEl = doc.getElementById('lobby-list-items');
-        assert.ok(itemsEl, 'lobby-list-items element should exist');
-        assert.ok(itemsEl._children.length > 0, 'should have cards from second request');
+        const ids = itemsEl._children.map(c => c.dataset['data-lobby-id']);
+        assert.ok(ids.includes('new'), 'new lobby should be in DOM');
+        assert.ok(!ids.includes('old'), 'old lobby should not be in DOM');
+        assert.equal(lobby.lobbyNextCursor, 'cursor-new', 'cursor should match second response');
+    });
+});
+
+describe('detail staleness via production openLobbyDetail', () => {
+    it('stale response does not overwrite newer DOM', async () => {
+        let resolveFirstLobby, resolveFirstPart, resolveSecondLobby, resolveSecondPart;
+        const fakeLobby1 = { id: '1', title: 'Old', route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, organizer: { display_name: 'Org' } };
+        const fakeLobby2 = { id: '2', title: 'New', route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, organizer: { display_name: 'Org' } };
+
+        let fetchCount = 0;
+        const fetchMock = (url) => {
+            fetchCount++;
+            const myCount = fetchCount;
+            if (url.includes('/participants')) {
+                if (myCount <= 2) return new Promise(r => { resolveFirstPart = r; });
+                return new Promise(r => { resolveSecondPart = r; });
+            }
+            if (myCount <= 2) return new Promise(r => { resolveFirstLobby = r; });
+            return new Promise(r => { resolveSecondLobby = r; });
+        };
+
+        const { lobby, doc } = createLobbyControllerVM(fetchMock);
+
+        const p1 = lobby.openLobbyDetail('1');
+        await new Promise(r => setTimeout(r, 10));
+
+        const p2 = lobby.openLobbyDetail('2');
+        await new Promise(r => setTimeout(r, 10));
+
+        resolveFirstLobby({ ok: true, status: 200, json: () => Promise.resolve(fakeLobby1) });
+        resolveFirstPart({ ok: true, status: 200, json: () => Promise.resolve({ participants: [] }) });
+
+        resolveSecondLobby({ ok: true, status: 200, json: () => Promise.resolve(fakeLobby2) });
+        resolveSecondPart({ ok: true, status: 200, json: () => Promise.resolve({ participants: [] }) });
+
+        await Promise.all([p1, p2]);
+
+        const contentEl = doc.getElementById('lobby-detail-content');
+        assert.ok(contentEl._children.length > 0, 'content should not be empty');
+        assert.equal(contentEl._children[0].textContent, 'New', 'should show new lobby title');
+    });
+
+    it('stale participantsResp.json does not overwrite DOM', async () => {
+        let resolvePartJson;
+        let fetchCount = 0;
+        const fakeLobby1 = { id: '1', title: 'Old', route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, organizer: { display_name: 'Org' } };
+        const fakeLobby2 = { id: '2', title: 'New', route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, organizer: { display_name: 'Org' } };
+
+        const fetchMock = (url) => {
+            fetchCount++;
+            const myCount = fetchCount;
+            if (url.includes('/participants')) {
+                if (myCount <= 2) {
+                    return Promise.resolve({ ok: true, status: 200, json: () => new Promise(r => { resolvePartJson = r; }) });
+                }
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ participants: [] }) });
+            }
+            if (myCount <= 2) {
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(fakeLobby1) });
+            }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(fakeLobby2) });
+        };
+
+        const { lobby, doc } = createLobbyControllerVM(fetchMock);
+
+        const p1 = lobby.openLobbyDetail('1');
+        await new Promise(r => setTimeout(r, 10));
+
+        const p2 = lobby.openLobbyDetail('2');
+        await new Promise(r => setTimeout(r, 10));
+
+        resolvePartJson({ participants: [{ id: 'stale' }] });
+        await Promise.all([p1, p2]);
+
+        const contentEl = doc.getElementById('lobby-detail-content');
+        assert.equal(contentEl._children[0].textContent, 'New', 'should show new lobby title');
+    });
+});
+
+describe('closeLobbyPanel during fetch', () => {
+    it('prevents loadLobbyList DOM update', async () => {
+        let resolveFetch;
+        const fetchMock = () => new Promise(r => { resolveFetch = r; });
+
+        const { lobby, doc } = createLobbyControllerVM(fetchMock);
+
+        const p = lobby.loadLobbyList(false, '');
+        lobby.closeLobbyPanel();
+
+        resolveFetch({
+            ok: true, status: 200,
+            json: () => Promise.resolve({ items: [{ id: 'new', title: 'New', route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, organizer: { display_name: 'Org' } }], next_cursor: 'cursor' })
+        });
+
+        await p;
+
+        const itemsEl = doc.getElementById('lobby-list-items');
+        assert.equal(itemsEl._children.length, 0, 'DOM should not be updated');
+    });
+
+    it('prevents openLobbyDetail DOM update', async () => {
+        let resolvers = [];
+        const fetchMock = () => new Promise(r => { resolvers.push(r); });
+
+        const { lobby, doc } = createLobbyControllerVM(fetchMock);
+
+        const p = lobby.openLobbyDetail('1');
+        lobby.closeLobbyPanel();
+
+        resolvers.forEach(r => r({ ok: true, status: 200, json: () => Promise.resolve({ participants: [] }) }));
+
+        await p;
+
+        const contentEl = doc.getElementById('lobby-detail-content');
+        assert.equal(contentEl._children.length, 0, 'DOM should not be updated after close');
     });
 });
 
@@ -392,22 +574,228 @@ describe('closeLobbyPanel invalidates requests', () => {
     });
 });
 
-describe('useGpsForLobby busy flag lifecycle', () => {
-    it('busy cleared after success', () => {
-        let capturedCb = null;
-        const fakeLm = { isInited: true, getLocation(cb) { capturedCb = cb; } };
+describe('leaveLobbyAction via production', () => {
+    function makeLeaveFetch(overrides) {
+        overrides = overrides || {};
+        return (url, opts) => {
+            if (opts && opts.method === 'POST' && url.includes('/leave')) {
+                if (overrides.rejectLeave) return Promise.reject(new Error('network'));
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+            }
+            if (url.includes('/participants')) {
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ participants: [] }) });
+            }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: '1', title: 'T', route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, can_leave: true, organizer: { display_name: 'Org' } }) });
+        };
+    }
+
+    it('two calls open one action, second blocked', () => {
+        const { lobby } = createLobbyControllerVM(makeLeaveFetch());
+        lobby.leaveLobbyAction('1');
+        assert.ok(lobby.lobbyIsBusy('leave:1'), 'first call sets busy');
+        lobby.leaveLobbyAction('1');
+        assert.ok(lobby.lobbyIsBusy('leave:1'), 'busy still set after second call');
+    });
+
+    it('confirm-yes sends one POST /leave', async () => {
+        let postCount = 0;
+        const fetchMock = (url, opts) => {
+            if (opts && opts.method === 'POST' && url.includes('/leave')) { postCount++; return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }); }
+            if (url.includes('/participants')) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ participants: [] }) });
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: '1', title: 'T', route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, can_leave: true, organizer: { display_name: 'Org' } }) });
+        };
+        const { lobby, elements } = createLobbyControllerVM(fetchMock);
+        lobby.leaveLobbyAction('1');
+        elements['confirm-yes'].click();
+        await new Promise(r => setTimeout(r, 50));
+        assert.equal(postCount, 1, 'should send exactly one POST /leave');
+        assert.ok(!lobby.lobbyIsBusy('leave:1'), 'busy should be cleared');
+    });
+
+    it('double confirm-yes does not duplicate POST', async () => {
+        let postCount = 0;
+        const fetchMock = (url, opts) => {
+            if (opts && opts.method === 'POST' && url.includes('/leave')) {
+                postCount++;
+                return new Promise(resolve => { setTimeout(() => resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }), 50); });
+            }
+            if (url.includes('/participants')) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ participants: [] }) });
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: '1', title: 'T', route_mode: 'easy', starts_at: '2099-01-01T00:00:00Z', city: 'M', participant_count: 0, capacity: 10, can_leave: true, organizer: { display_name: 'Org' } }) });
+        };
+        const { lobby, elements } = createLobbyControllerVM(fetchMock);
+        lobby.leaveLobbyAction('1');
+        elements['confirm-yes'].click();
+        elements['confirm-yes'].click();
+        await new Promise(r => setTimeout(r, 100));
+        assert.equal(postCount, 1, 'should not duplicate POST');
+    });
+
+    it('busy freed after rejected fetch', async () => {
+        const { lobby, elements } = createLobbyControllerVM(makeLeaveFetch({ rejectLeave: true }));
+        lobby.leaveLobbyAction('1');
+        elements['confirm-yes'].click();
+        await new Promise(r => setTimeout(r, 50));
+        assert.ok(!lobby.lobbyIsBusy('leave:1'), 'busy should be cleared after error');
+    });
+
+    it('overlay does not create POST', () => {
+        let postCount = 0;
+        const fetchMock = (url, opts) => {
+            if (opts && opts.method === 'POST') postCount++;
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        };
+        const { lobby, elements } = createLobbyControllerVM(fetchMock);
+        lobby.leaveLobbyAction('1');
+        const confirmEl = elements['confirm-modal'];
+        const handlers = confirmEl._listeners.click || [];
+        if (handlers.length > 0) handlers[0]({ target: confirmEl });
+        assert.equal(postCount, 0, 'no POST on overlay');
+        assert.ok(!lobby.lobbyIsBusy('leave:1'));
+    });
+
+    it('no button does not create POST', () => {
+        let postCount = 0;
+        const fetchMock = (url, opts) => {
+            if (opts && opts.method === 'POST') postCount++;
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        };
+        const { lobby, elements } = createLobbyControllerVM(fetchMock);
+        lobby.leaveLobbyAction('1');
+        elements['confirm-no'].click();
+        assert.equal(postCount, 0, 'no POST on no');
+        assert.ok(!lobby.lobbyIsBusy('leave:1'));
+    });
+});
+
+describe('cancelLobbyAction via production', () => {
+    function makeCancelFetch(overrides) {
+        overrides = overrides || {};
+        return (url, opts) => {
+            if (opts && opts.method === 'POST' && url.includes('/cancel')) {
+                if (overrides.rejectCancel) return Promise.reject(new Error('network'));
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+            }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ items: [] }) });
+        };
+    }
+
+    it('confirm-yes sends one POST /cancel', async () => {
+        let postCount = 0;
+        const fetchMock = (url, opts) => {
+            if (opts && opts.method === 'POST' && url.includes('/cancel')) { postCount++; return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }); }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ items: [] }) });
+        };
+        const { lobby, elements } = createLobbyControllerVM(fetchMock);
+        lobby.cancelLobbyAction('1');
+        elements['confirm-yes'].click();
+        await new Promise(r => setTimeout(r, 50));
+        assert.equal(postCount, 1, 'should send exactly one POST /cancel');
+        assert.ok(!lobby.lobbyIsBusy('cancel:1'), 'busy should be cleared');
+    });
+
+    it('double confirm-yes does not duplicate POST', async () => {
+        let postCount = 0;
+        const fetchMock = (url, opts) => {
+            if (opts && opts.method === 'POST' && url.includes('/cancel')) {
+                postCount++;
+                return new Promise(resolve => { setTimeout(() => resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }), 50); });
+            }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ items: [] }) });
+        };
+        const { lobby, elements } = createLobbyControllerVM(fetchMock);
+        lobby.cancelLobbyAction('1');
+        elements['confirm-yes'].click();
+        elements['confirm-yes'].click();
+        await new Promise(r => setTimeout(r, 100));
+        assert.equal(postCount, 1, 'should not duplicate POST');
+    });
+
+    it('busy freed after rejected fetch', async () => {
+        const { lobby, elements } = createLobbyControllerVM(makeCancelFetch({ rejectCancel: true }));
+        lobby.cancelLobbyAction('1');
+        elements['confirm-yes'].click();
+        await new Promise(r => setTimeout(r, 50));
+        assert.ok(!lobby.lobbyIsBusy('cancel:1'), 'busy should be cleared after error');
+    });
+});
+
+describe('GPS busy lifecycle via useGpsForLobby', () => {
+    it('blocked during Telegram request', () => {
+        let callCount = 0;
+        const fakeLm = { isInited: true, getLocation() { callCount++; } };
+        const { lobby, ctx } = createLobbyControllerVM(defaultFetch(), { navigator: { geolocation: null } });
+        ctx.window.Telegram = { WebApp: { LocationManager: fakeLm } };
+
+        lobby.useGpsForLobby();
+        lobby.useGpsForLobby();
+        assert.equal(callCount, 1, 'getLocation called once');
+    });
+
+    it('blocked during browser fallback', () => {
+        let geoCount = 0;
+        const fakeLm = { isInited: true, getLocation(cb) { cb(null); } };
         const { lobby, ctx } = createLobbyControllerVM(defaultFetch(), {
-            navigator: { geolocation: null },
+            navigator: { geolocation: { getCurrentPosition() { geoCount++; } } },
         });
         ctx.window.Telegram = { WebApp: { LocationManager: fakeLm } };
 
         lobby.useGpsForLobby();
-        // busy is set, call with success
+        lobby.useGpsForLobby();
+        assert.equal(geoCount, 1, 'getCurrentPosition called once');
+    });
+
+    it('busy cleared after browser success', () => {
+        let capturedSuccess = null;
+        const { lobby } = createLobbyControllerVM(defaultFetch(), {
+            navigator: { geolocation: { getCurrentPosition(s) { capturedSuccess = s; } } },
+        });
+
+        lobby.useGpsForLobby();
+        capturedSuccess({ coords: { latitude: 55.75, longitude: 37.62 } });
+
+        capturedSuccess = null;
+        lobby.useGpsForLobby();
+        assert.ok(capturedSuccess !== null, 'should call again after success');
+    });
+
+    it('busy cleared after browser error', () => {
+        let capturedError = null;
+        const { lobby } = createLobbyControllerVM(defaultFetch(), {
+            navigator: { geolocation: { getCurrentPosition(_, e) { capturedError = e; } } },
+        });
+
+        lobby.useGpsForLobby();
+        capturedError({ code: 2, message: 'unavailable' });
+
+        capturedError = null;
+        lobby.useGpsForLobby();
+        assert.ok(capturedError !== null, 'should call again after error');
+    });
+
+    it('busy cleared when no navigator.geolocation', () => {
+        const { lobby, ctx } = createLobbyControllerVM(defaultFetch(), {
+            navigator: { geolocation: null },
+        });
+
+        lobby.useGpsForLobby();
+        const el = ctx.document.getElementById('lobby-point-status');
+        assert.ok(el.textContent.includes('\u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044f'));
+        el.textContent = '';
+        lobby.useGpsForLobby();
+        assert.ok(el.textContent.includes('\u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044f'), 'second call should proceed');
+    });
+
+    it('after completion, new request allowed', () => {
+        let capturedCb = null;
+        const fakeLm = { isInited: true, getLocation(cb) { capturedCb = cb; } };
+        const { lobby, ctx } = createLobbyControllerVM(defaultFetch(), { navigator: { geolocation: null } });
+        ctx.window.Telegram = { WebApp: { LocationManager: fakeLm } };
+
+        lobby.useGpsForLobby();
         capturedCb({ latitude: 55.75, longitude: 37.62 });
-        // After success, busy should be cleared (we can call again)
+
         capturedCb = null;
         lobby.useGpsForLobby();
-        // Second call should work (busy was cleared)
-        assert.ok(capturedCb !== null, 'should be able to call again after success');
+        assert.ok(capturedCb !== null, 'should be able to call again');
     });
 });
