@@ -1065,16 +1065,9 @@ async def list_public_profiles(
             language_code=telegram_user.get("language_code"),
             photo_url=telegram_user.get("photo_url"),
         )
-        q_clean = q.strip() if q else None
-        city_clean = city.strip() if city else None
-        club_clean = club.strip() if club else None
-
-        if q_clean is not None and len(q_clean) > 150:
-            q_clean = q_clean[:150]
-        if city_clean is not None and len(city_clean) > 100:
-            city_clean = city_clean[:100]
-        if club_clean is not None and len(club_clean) > 150:
-            club_clean = club_clean[:150]
+        q_clean = q.strip() or None if q is not None else None
+        city_clean = city.strip() or None if city is not None else None
+        club_clean = club.strip() or None if club is not None else None
 
         result = await search_public_profiles(
             viewer_id=me["id"],

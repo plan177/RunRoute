@@ -15,6 +15,8 @@
     // --- State ---
     var _nextCursor = null;
     var _busy = false;
+    var _requestToken = 0;
+    var _shownIds = new Set();
 
     // --- Helpers ---
     function _el(id) { return document.getElementById(id); }
@@ -29,6 +31,7 @@
     // --- Card rendering ---
     function _buildRunnerCard(runner) {
         var card = safeCreateEl('div', { className: 'runner-card' });
+        card.dataset.userId = runner.user_id;
 
         var header = safeCreateEl('div', { className: 'runner-card-header' });
         var avatarWrap = safeCreateEl('div', { className: 'runner-card-avatar' });
@@ -84,6 +87,9 @@
 
     // --- List loading ---
     async function loadRunnerList(reset) {
+        if (reset) {
+            _busy = false;
+        }
         if (_busy) return;
         _busy = true;
 
@@ -96,6 +102,7 @@
         if (reset) {
             itemsEl.innerHTML = '';
             _nextCursor = null;
+            _shownIds.clear();
         }
 
         statusEl.classList.add('hidden');
@@ -114,18 +121,25 @@
         params.set('limit', '20');
         if (_nextCursor) params.set('cursor', _nextCursor);
 
+        var myToken = ++_requestToken;
+
         try {
             var resp = await fetch(apiUrl('/api/public-profiles?' + params.toString()), {
                 headers: getApiHeaders(),
             });
+            if (myToken !== _requestToken) return;
+
             if (!resp.ok) {
                 var errBody = await resp.json().catch(function () { return {}; });
+                if (myToken !== _requestToken) return;
                 var msg = errBody.detail || '\u0421\u0435\u0440\u0432\u0438\u0441 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d';
                 _showStatus(msg, true);
                 loadingEl.classList.add('hidden');
                 return;
             }
             var data = await resp.json();
+            if (myToken !== _requestToken) return;
+
             var items = data.items || [];
             _nextCursor = data.next_cursor || null;
 
@@ -141,12 +155,15 @@
             }
 
             items.forEach(function (runner) {
+                if (_shownIds.has(runner.user_id)) return;
+                _shownIds.add(runner.user_id);
                 itemsEl.appendChild(_buildRunnerCard(runner));
             });
 
             loadingEl.classList.add('hidden');
             if (_nextCursor) loadMoreEl.classList.remove('hidden');
         } catch (e) {
+            if (myToken !== _requestToken) return;
             loadingEl.classList.add('hidden');
             _showStatus('\u0421\u0435\u0440\u0432\u0438\u0441 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d', true);
         } finally {
@@ -162,6 +179,7 @@
 
     function closeRunnersPanel() {
         _el('runners-panel').classList.add('hidden');
+        ++_requestToken;
     }
 
     function applyFilters() {
@@ -176,7 +194,37 @@
     }
 
     function loadMore() {
-        loadRunnerList(false);
+        return loadRunnerList(false);
+    }
+
+    // --- Follow state sync ---
+    function updateRunnerFollowState(userId, state) {
+        var cards = _el('runners-list-items').querySelectorAll('.runner-card');
+        cards.forEach(function (card) {
+            if (card.dataset.userId !== userId) return;
+            var footer = card.querySelector('.runner-card-footer');
+            if (!footer) return;
+
+            // Update followers count
+            var followersEl = card.querySelector('.runner-card-followers');
+            if (followersEl && state.followers_count != null) {
+                var count = state.followers_count;
+                safeSetText(followersEl, count + ' ' + _pluralize(count, '\u043f\u043e\u0434\u043f\u0438\u0441\u0447\u0438\u043a', '\u043f\u043e\u0434\u043f\u0438\u0441\u0447\u0438\u043a\u0430', '\u043f\u043e\u0434\u043f\u0438\u0441\u0447\u0438\u043a\u043e\u0432'));
+            }
+
+            // Update following badge
+            var existingBadge = card.querySelector('.runner-card-following-badge');
+            if (state.is_following) {
+                if (!existingBadge) {
+                    footer.insertBefore(
+                        safeCreateEl('span', { className: 'runner-card-following-badge', textContent: '\u0412 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0435' }),
+                        footer.firstChild
+                    );
+                }
+            } else {
+                if (existingBadge) existingBadge.remove();
+            }
+        });
     }
 
     // --- Public API ---
@@ -187,6 +235,10 @@
         resetFilters: resetFilters,
         loadMore: loadMore,
         loadRunnerList: loadRunnerList,
+        updateRunnerFollowState: updateRunnerFollowState,
         _buildRunnerCard: _buildRunnerCard,
+        get _shownIds() { return _shownIds; },
+        get _nextCursor() { return _nextCursor; },
+        get _requestToken() { return _requestToken; },
     };
 });

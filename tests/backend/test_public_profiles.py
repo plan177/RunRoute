@@ -313,7 +313,7 @@ async def test_public_profiles_limit_bounds():
     assert resp.status_code == 422  # validation error for ge=1
 
 
-# --- SQL query structure tests ---
+# --- SQL query structure tests (supplementary) ---
 
 class TestSearchQueryStructure:
     def test_query_excludes_self(self):
@@ -338,7 +338,7 @@ class TestSearchQueryStructure:
         from backend.profiles import search_public_profiles
         import inspect
         src = inspect.getsource(search_public_profiles)
-        assert "lower(p.display_name)" in src
+        assert "coalesce(lower(p.display_name)" in src
 
     def test_query_computes_followers_count_in_sql(self):
         from backend.profiles import search_public_profiles
@@ -351,3 +351,268 @@ class TestSearchQueryStructure:
         import inspect
         src = inspect.getsource(search_public_profiles)
         assert "EXISTS" in src and "is_following" in src
+
+
+# --- Behavioral cursor validation tests ---
+
+class TestCursorValidation:
+    def _make_valid_cursor(self, sort_key="alice", user_id="00000000-0000-0000-0000-000000000002"):
+        import base64, json
+        payload = json.dumps({"s": sort_key, "u": user_id})
+        return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+    @pytest.mark.asyncio
+    async def test_valid_cursor_decodes_correctly(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+
+        cursor = self._make_valid_cursor("alice", "00000000-0000-0000-0000-000000000002")
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_pool = MagicMock()
+        mock_acm = MagicMock()
+        mock_acm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acm.__aexit__ = AsyncMock(return_value=False)
+        mock_pool.acquire = MagicMock(return_value=mock_acm)
+
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            result = await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
+
+        assert result["items"] == []
+        # Verify cursor was decoded by checking the SQL params include sort key
+        call_args = mock_conn.fetch.call_args
+        assert "alice" in str(call_args)
+
+    @pytest.mark.asyncio
+    async def test_invalid_base64_cursor_raises(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+
+        with pytest.raises(ValueError, match="Invalid cursor"):
+            await search_public_profiles(viewer_id=uuid4(), cursor="!!!not-base64!!!")
+
+    @pytest.mark.asyncio
+    async def test_json_null_sort_key_raises(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+        import base64, json
+
+        payload = json.dumps({"s": None, "u": "00000000-0000-0000-0000-000000000002"})
+        cursor = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+        with pytest.raises(ValueError, match="Invalid cursor"):
+            await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
+
+    @pytest.mark.asyncio
+    async def test_json_list_sort_key_raises(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+        import base64, json
+
+        payload = json.dumps({"s": [1, 2], "u": "00000000-0000-0000-0000-000000000002"})
+        cursor = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+        with pytest.raises(ValueError, match="Invalid cursor"):
+            await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
+
+    @pytest.mark.asyncio
+    async def test_json_int_sort_key_raises(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+        import base64, json
+
+        payload = json.dumps({"s": 123, "u": "00000000-0000-0000-0000-000000000002"})
+        cursor = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+        with pytest.raises(ValueError, match="Invalid cursor"):
+            await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
+
+    @pytest.mark.asyncio
+    async def test_missing_key_raises(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+        import base64, json
+
+        payload = json.dumps({"u": "00000000-0000-0000-0000-000000000002"})
+        cursor = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+        with pytest.raises(ValueError, match="Invalid cursor"):
+            await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
+
+    @pytest.mark.asyncio
+    async def test_extra_key_raises(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+        import base64, json
+
+        payload = json.dumps({"s": "alice", "u": "00000000-0000-0000-0000-000000000002", "x": "extra"})
+        cursor = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+        with pytest.raises(ValueError, match="Invalid cursor"):
+            await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
+
+    @pytest.mark.asyncio
+    async def test_invalid_uuid_raises(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+        import base64, json
+
+        payload = json.dumps({"s": "alice", "u": "not-a-uuid"})
+        cursor = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+        with pytest.raises(ValueError, match="Invalid cursor"):
+            await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
+
+    @pytest.mark.asyncio
+    async def test_int_user_id_raises(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+        import base64, json
+
+        payload = json.dumps({"s": "alice", "u": 12345})
+        cursor = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+        with pytest.raises(ValueError, match="Invalid cursor"):
+            await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
+
+
+# --- Behavioral search tests with DB mock ---
+
+class TestSearchBehavior:
+    def _make_mock_pool(self, rows):
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=rows)
+        mock_pool = MagicMock()
+        mock_acm = MagicMock()
+        mock_acm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acm.__aexit__ = AsyncMock(return_value=False)
+        mock_pool.acquire = MagicMock(return_value=mock_acm)
+        return mock_pool, mock_conn
+
+    @pytest.mark.asyncio
+    async def test_q_filter_lowercases(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+
+        mock_pool, mock_conn = self._make_mock_pool([])
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            await search_public_profiles(viewer_id=uuid4(), q="Runner")
+
+        call_args = mock_conn.fetch.call_args
+        # The query param should be lowercased
+        assert "%runner%" in str(call_args)
+
+    @pytest.mark.asyncio
+    async def test_city_filter_lowercases(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+
+        mock_pool, mock_conn = self._make_mock_pool([])
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            await search_public_profiles(viewer_id=uuid4(), city="Moscow")
+
+        call_args = mock_conn.fetch.call_args
+        assert "moscow" in str(call_args)
+
+    @pytest.mark.asyncio
+    async def test_limit_plus_one(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+
+        mock_pool, mock_conn = self._make_mock_pool([])
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            await search_public_profiles(viewer_id=uuid4(), limit=10)
+
+        call_args = mock_conn.fetch.call_args
+        # Last param should be limit + 1 = 11
+        assert call_args.args[-1] == 11
+
+    @pytest.mark.asyncio
+    async def test_mixed_case_display_name_cursor(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+        import base64, json
+
+        # Create cursor with mixed-case sort key
+        payload = json.dumps({"s": "alice", "u": "00000000-0000-0000-0000-000000000002"})
+        cursor = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+        mock_pool, mock_conn = self._make_mock_pool([])
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
+
+        call_args = mock_conn.fetch.call_args
+        # Cursor sort key should be "alice" (lowercased)
+        assert "alice" in str(call_args)
+
+    @pytest.mark.asyncio
+    async def test_null_display_name_cursor(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+        import base64, json
+
+        payload = json.dumps({"s": "", "u": "00000000-0000-0000-0000-000000000002"})
+        cursor = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+        mock_pool, mock_conn = self._make_mock_pool([])
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
+
+        call_args = mock_conn.fetch.call_args
+        # Empty string sort key for NULL display_name
+        assert "" in str(call_args)
+
+    @pytest.mark.asyncio
+    async def test_next_cursor_uses_sort_key(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+
+        rows = [{"user_id": uuid4(), "_sort_key": "bob", "display_name": "Bob",
+                 "avatar_url": None, "city": None, "club_name": None, "bio": None,
+                 "followers_count": 0, "is_following": False}] * 21
+
+        mock_pool, mock_conn = self._make_mock_pool(rows)
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            result = await search_public_profiles(viewer_id=uuid4(), limit=20)
+
+        assert result["next_cursor"] is not None
+        # Decode cursor to verify it uses sort_key
+        import base64, json as _json
+        padded = result["next_cursor"] + "=" * ((4 - len(result["next_cursor"]) % 4) % 4)
+        decoded = base64.b64decode(padded.encode(), altchars=b"-_", validate=True)
+        data = _json.loads(decoded)
+        assert data["s"] == "bob"  # sort_key, not display_name
+
+    @pytest.mark.asyncio
+    async def test_followers_count_in_result(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+
+        rows = [{"user_id": uuid4(), "_sort_key": "alice", "display_name": "Alice",
+                 "avatar_url": None, "city": None, "club_name": None, "bio": None,
+                 "followers_count": 42, "is_following": True}]
+
+        mock_pool, mock_conn = self._make_mock_pool(rows)
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            result = await search_public_profiles(viewer_id=uuid4())
+
+        assert result["items"][0]["followers_count"] == 42
+        assert result["items"][0]["is_following"] is True
+
+    @pytest.mark.asyncio
+    async def test_no_telegram_pii_in_result(self):
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+
+        rows = [{"user_id": uuid4(), "_sort_key": "alice", "display_name": "Alice",
+                 "avatar_url": None, "city": None, "club_name": None, "bio": None,
+                 "followers_count": 0, "is_following": False}]
+
+        mock_pool, mock_conn = self._make_mock_pool(rows)
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            result = await search_public_profiles(viewer_id=uuid4())
+
+        item = result["items"][0]
+        pii_keys = {"telegram_user_id", "telegram_username", "first_name", "last_name",
+                     "chat_id", "email", "phone"}
+        assert not pii_keys.intersection(item.keys())

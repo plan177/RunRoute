@@ -2728,6 +2728,7 @@ function updatePublicFollowUI(isFollowing, runNotifs, userId) {
                 safeSetText(document.getElementById('public-followers-count'),
                     result.followers_count != null ? result.followers_count : 0);
                 status.classList.add('hidden');
+                if (typeof RunRouteRunners !== 'undefined' && RunRouteRunners.updateRunnerFollowState) RunRouteRunners.updateRunnerFollowState(userId, { is_following: isFollowing, followers_count: result.followers_count });
             } else {
                 let msg = 'Не удалось изменить подписку';
                 try {

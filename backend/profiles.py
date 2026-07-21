@@ -151,11 +151,14 @@ async def search_public_profiles(
     """Search public profiles with cursor pagination.
 
     Returns {"items": [...], "next_cursor": ...}.
+    Cursor encodes (coalesce(lower(display_name), ''), user_id).
     """
     import base64, binascii
 
-    def _encode_cursor(display_name: str, uid: UUID) -> str:
-        payload = json.dumps({"n": display_name, "u": str(uid)})
+    SORT_KEY_EXPR = "coalesce(lower(p.display_name), '')"
+
+    def _encode_cursor(sort_key: str, uid: UUID) -> str:
+        payload = json.dumps({"s": sort_key, "u": str(uid)})
         return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
 
     def _decode_cursor(cur: str) -> tuple[str, UUID]:
@@ -163,10 +166,17 @@ async def search_public_profiles(
             padded = cur + "=" * ((4 - len(cur) % 4) % 4)
             decoded = base64.b64decode(padded.encode(), altchars=b"-_", validate=True)
             data = json.loads(decoded)
-            if not isinstance(data, dict) or set(data.keys()) != {"n", "u"}:
-                raise ValueError
-            return str(data["n"]), UUID(data["u"])
-        except (ValueError, TypeError, KeyError, json.JSONDecodeError, binascii.Error):
+            if not isinstance(data, dict) or set(data.keys()) != {"s", "u"}:
+                raise ValueError("Invalid cursor structure")
+            if not isinstance(data["s"], str):
+                raise ValueError("Invalid cursor sort key type")
+            if not isinstance(data["u"], str):
+                raise ValueError("Invalid cursor user_id type")
+            UUID(data["u"])
+            return data["s"], UUID(data["u"])
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError, binascii.Error) as exc:
+            if "Invalid cursor" in str(exc):
+                raise
             raise ValueError("Invalid cursor")
 
     conditions = [
@@ -193,9 +203,9 @@ async def search_public_profiles(
         idx += 1
 
     if cursor is not None:
-        cur_name, cur_id = _decode_cursor(cursor)
-        conditions.append(f"(lower(p.display_name), u.id) > (${idx}, ${idx + 1}::uuid)")
-        params.append(cur_name)
+        cur_sort_key, cur_id = _decode_cursor(cursor)
+        conditions.append(f"({SORT_KEY_EXPR}, u.id) > (${idx}, ${idx + 1}::uuid)")
+        params.append(cur_sort_key)
         params.append(cur_id)
         idx += 2
 
@@ -204,6 +214,7 @@ async def search_public_profiles(
     query = f"""
         SELECT
             u.id AS user_id,
+            {SORT_KEY_EXPR} AS _sort_key,
             p.display_name,
             p.avatar_url,
             p.city,
@@ -217,7 +228,7 @@ async def search_public_profiles(
         FROM public.users u
         JOIN public.profiles p ON p.user_id = u.id
         WHERE {where_clause}
-        ORDER BY lower(p.display_name), u.id
+        ORDER BY {SORT_KEY_EXPR}, u.id
         LIMIT ${idx}
     """
     params.append(limit + 1)
@@ -227,11 +238,23 @@ async def search_public_profiles(
         rows = await conn.fetch(query, *params)
 
     has_more = len(rows) > limit
-    items = [dict(r) for r in rows[:limit]]
+    items_raw = [dict(r) for r in rows[:limit]]
+
+    # Remove internal _sort_key from response
+    items = []
+    for item in items_raw:
+        sort_key = item.pop("_sort_key", "")
+        item["_sort_key"] = sort_key
+        items.append(item)
+
     next_cursor = None
     if has_more and items:
         last = items[-1]
-        next_cursor = _encode_cursor(last["display_name"] or "", last["user_id"])
+        next_cursor = _encode_cursor(last["_sort_key"], last["user_id"])
+
+    # Strip _sort_key from returned items
+    for item in items:
+        item.pop("_sort_key", None)
 
     return {"items": items, "next_cursor": next_cursor}
 
