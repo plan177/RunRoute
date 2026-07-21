@@ -32,6 +32,7 @@
                     <button id="menu-profile" class="menu-item" aria-label="Профиль">Профиль</button>
                     <button id="menu-calendar" class="menu-item" aria-label="Календарь">Календарь</button>
                     <button id="menu-lobby" class="menu-item" aria-label="Совместные пробежки">Совместные пробежки</button>
+                    <button id="menu-runners" class="menu-item" aria-label="Бегуны">Бегуны</button>
                     <button id="menu-feedback" class="menu-item" aria-label="Обратная связь">Обратная связь</button>
                 </div>
             </div>
@@ -598,6 +599,46 @@
         </div>
     </div>
 
+    <div id="runners-panel" class="lobby-panel hidden">
+        <div class="lobby-panel-header">
+            <h2 class="lobby-panel-title">Бегуны</h2>
+            <button id="runners-close-btn" class="lobby-close-btn" aria-label="Закрыть">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+
+        <div class="lobby-filters">
+            <div class="profile-field">
+                <label for="runners-filter-q">Имя</label>
+                <input type="text" id="runners-filter-q" maxlength="150" placeholder="Поиск по имени" />
+            </div>
+            <div class="profile-field">
+                <label for="runners-filter-city">Город</label>
+                <input type="text" id="runners-filter-city" maxlength="100" placeholder="Все города" />
+            </div>
+            <div class="profile-field">
+                <label for="runners-filter-club">Клуб</label>
+                <input type="text" id="runners-filter-club" maxlength="150" placeholder="Все клубы" />
+            </div>
+            <div class="lobby-filter-actions">
+                <button id="runners-filter-apply" class="modal-btn primary">Найти</button>
+                <button id="runners-filter-reset" class="modal-btn secondary">Сбросить</button>
+            </div>
+        </div>
+
+        <div id="runners-list-loading" class="profile-loading">
+            <div class="skeleton skeleton-line"></div>
+            <div class="skeleton skeleton-line short"></div>
+            <div class="skeleton skeleton-line"></div>
+        </div>
+        <div id="runners-list-items"></div>
+        <div id="runners-list-empty" class="lobby-empty hidden">Бегуны не найдены</div>
+        <div id="runners-list-load-more" class="hidden">
+            <button id="runners-list-load-more-btn" class="modal-btn secondary">Показать ещё</button>
+        </div>
+        <div id="runners-list-status" class="profile-status hidden"></div>
+    </div>
+
     <div id="lobby-panel" class="lobby-panel hidden">
         <div class="lobby-panel-header">
             <h2 class="lobby-panel-title">Совместные пробежки</h2>
@@ -758,6 +799,7 @@
     <script src="public-profile-utils.js"></script>
     <script src="lobby-utils.js"></script>
     <script src="lobby-controller.js"></script>
+    <script src="directory-controller.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

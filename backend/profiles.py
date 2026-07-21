@@ -140,6 +140,102 @@ async def user_exists(user_id: UUID) -> bool:
     return bool(row)
 
 
+async def search_public_profiles(
+    viewer_id: UUID,
+    q: Optional[str] = None,
+    city: Optional[str] = None,
+    club: Optional[str] = None,
+    limit: int = 20,
+    cursor: Optional[str] = None,
+) -> dict:
+    """Search public profiles with cursor pagination.
+
+    Returns {"items": [...], "next_cursor": ...}.
+    """
+    import base64, binascii
+
+    def _encode_cursor(display_name: str, uid: UUID) -> str:
+        payload = json.dumps({"n": display_name, "u": str(uid)})
+        return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+    def _decode_cursor(cur: str) -> tuple[str, UUID]:
+        try:
+            padded = cur + "=" * ((4 - len(cur) % 4) % 4)
+            decoded = base64.b64decode(padded.encode(), altchars=b"-_", validate=True)
+            data = json.loads(decoded)
+            if not isinstance(data, dict) or set(data.keys()) != {"n", "u"}:
+                raise ValueError
+            return str(data["n"]), UUID(data["u"])
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError, binascii.Error):
+            raise ValueError("Invalid cursor")
+
+    conditions = [
+        "u.is_active = true",
+        "p.is_public = true",
+        "u.id != $1",
+    ]
+    params: list = [viewer_id]
+    idx = 2
+
+    if q is not None:
+        conditions.append(f"lower(p.display_name) LIKE ${idx}")
+        params.append(f"%{q.lower()}%")
+        idx += 1
+
+    if city is not None:
+        conditions.append(f"lower(p.city) = ${idx}")
+        params.append(city.lower())
+        idx += 1
+
+    if club is not None:
+        conditions.append(f"lower(p.club_name) LIKE ${idx}")
+        params.append(f"%{club.lower()}%")
+        idx += 1
+
+    if cursor is not None:
+        cur_name, cur_id = _decode_cursor(cursor)
+        conditions.append(f"(lower(p.display_name), u.id) > (${idx}, ${idx + 1}::uuid)")
+        params.append(cur_name)
+        params.append(cur_id)
+        idx += 2
+
+    where_clause = " AND ".join(conditions)
+
+    query = f"""
+        SELECT
+            u.id AS user_id,
+            p.display_name,
+            p.avatar_url,
+            p.city,
+            p.club_name,
+            p.bio,
+            (SELECT COUNT(*) FROM public.follows WHERE following_id = u.id) AS followers_count,
+            EXISTS(
+                SELECT 1 FROM public.follows
+                WHERE follower_id = $1 AND following_id = u.id
+            ) AS is_following
+        FROM public.users u
+        JOIN public.profiles p ON p.user_id = u.id
+        WHERE {where_clause}
+        ORDER BY lower(p.display_name), u.id
+        LIMIT ${idx}
+    """
+    params.append(limit + 1)
+
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+
+    has_more = len(rows) > limit
+    items = [dict(r) for r in rows[:limit]]
+    next_cursor = None
+    if has_more and items:
+        last = items[-1]
+        next_cursor = _encode_cursor(last["display_name"] or "", last["user_id"])
+
+    return {"items": items, "next_cursor": next_cursor}
+
+
 async def update_profile_fields(user_id: UUID, fields: dict) -> dict:
     """Partially update a profile. Only provided keys are written.
 

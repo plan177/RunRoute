@@ -13,7 +13,7 @@ from .config import get_settings
 from .database import init_db_pool, close_db_pool, check_database_connection
 from .auth import get_current_telegram_user
 from .users import upsert_user
-from .profiles import get_profile, get_profile_with_counts, get_public_profile, update_profile_fields, user_exists
+from .profiles import get_profile, get_profile_with_counts, get_public_profile, update_profile_fields, user_exists, search_public_profiles
 from .models import ProfileUpdateRequest, SavedRouteCreate, SavedRouteRename, PlannedRunCreate, PlannedRunUpdate
 from .models import FollowNotificationsUpdate
 from .routes import create_saved_route, list_saved_routes, get_saved_route, rename_saved_route, delete_saved_route
@@ -1044,6 +1044,53 @@ async def get_my_following(
         raise
     except Exception as exc:
         logger.error("Failed to fetch following error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/public-profiles")
+async def list_public_profiles(
+    q: Optional[str] = Query(None, max_length=150),
+    city: Optional[str] = Query(None, max_length=100),
+    club: Optional[str] = Query(None, max_length=150),
+    limit: int = Query(20, ge=1, le=50),
+    cursor: Optional[str] = Query(None, max_length=2048),
+    telegram_user: dict = Depends(get_current_telegram_user),
+):
+    try:
+        me = await upsert_user(
+            telegram_user_id=telegram_user["id"],
+            username=telegram_user.get("username"),
+            first_name=telegram_user.get("first_name", ""),
+            last_name=telegram_user.get("last_name", ""),
+            language_code=telegram_user.get("language_code"),
+            photo_url=telegram_user.get("photo_url"),
+        )
+        q_clean = q.strip() if q else None
+        city_clean = city.strip() if city else None
+        club_clean = club.strip() if club else None
+
+        if q_clean is not None and len(q_clean) > 150:
+            q_clean = q_clean[:150]
+        if city_clean is not None and len(city_clean) > 100:
+            city_clean = city_clean[:100]
+        if club_clean is not None and len(club_clean) > 150:
+            club_clean = club_clean[:150]
+
+        result = await search_public_profiles(
+            viewer_id=me["id"],
+            q=q_clean,
+            city=city_clean,
+            club=club_clean,
+            limit=limit,
+            cursor=cursor,
+        )
+        return result
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to search public profiles error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
