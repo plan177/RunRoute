@@ -1659,6 +1659,7 @@ function initMenu() {
     const profileBtn = document.getElementById('menu-profile');
     const calendarBtn = document.getElementById('menu-calendar');
     const feedbackBtn = document.getElementById('menu-feedback');
+    const runnersBtn = document.getElementById('menu-runners');
 
     btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1692,6 +1693,11 @@ function initMenu() {
     feedbackBtn.addEventListener('click', () => {
         menu.classList.add('hidden');
         openFeedbackModal();
+    });
+
+    runnersBtn.addEventListener('click', () => {
+        menu.classList.add('hidden');
+        RunRouteRunners.openRunnersPanel();
     });
 }
 
@@ -2722,6 +2728,7 @@ function updatePublicFollowUI(isFollowing, runNotifs, userId) {
                 safeSetText(document.getElementById('public-followers-count'),
                     result.followers_count != null ? result.followers_count : 0);
                 status.classList.add('hidden');
+                if (typeof RunRouteRunners !== 'undefined' && RunRouteRunners.updateRunnerFollowState) RunRouteRunners.updateRunnerFollowState(userId, { is_following: isFollowing, followers_count: result.followers_count });
             } else {
                 let msg = 'Не удалось изменить подписку';
                 try {
@@ -2939,6 +2946,19 @@ function initLobby() {
     document.getElementById('lobby-form-route-add-btn').addEventListener('click', function () { L.useRouteStartForLobby(); });
 }
 
+function initRunners() {
+    var R = RunRouteRunners;
+    document.getElementById('runners-close-btn').addEventListener('click', function () { R.closeRunnersPanel(); });
+    document.getElementById('runners-filter-apply').addEventListener('click', function () { R.applyFilters(); });
+    document.getElementById('runners-filter-reset').addEventListener('click', function () { R.resetFilters(); });
+    document.getElementById('runners-list-load-more-btn').addEventListener('click', function () { R.loadMore(); });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !_el('runners-panel').classList.contains('hidden')) {
+            R.closeRunnersPanel();
+        }
+    });
+}
+
 // === Init all ===
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -2960,6 +2980,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initPublicProfile();
     initFollowList();
     initLobby();
+    initRunners();
     loadCurrentUser();
     document.getElementById('track-start-btn').addEventListener('click', startTracking);
     document.getElementById('track-stop-btn').addEventListener('click', stopTracking);

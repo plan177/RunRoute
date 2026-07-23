@@ -2126,3 +2126,67 @@ body {
 .lobby-point-actions {
     display: flex; gap: 8px; margin-bottom: 4px;
 }
+
+/* Runner Directory */
+
+.runner-card {
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    margin-bottom: 10px;
+    transition: border-color 0.2s;
+}
+
+.runner-card:active { border-color: var(--primary); }
+
+.runner-card-header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 8px;
+}
+
+.runner-card-avatar {
+    flex-shrink: 0;
+}
+
+.runner-card-avatar img {
+    width: 48px; height: 48px; border-radius: 50%; object-fit: cover;
+}
+
+.runner-card-info { flex: 1; min-width: 0; }
+
+.runner-card-name {
+    font-size: 16px; font-weight: 600; color: var(--text);
+    word-break: break-word;
+}
+
+.runner-card-meta {
+    display: flex; flex-wrap: wrap; gap: 4px 12px;
+    font-size: 13px; color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.runner-card-bio {
+    font-size: 13px; color: var(--text-secondary);
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.runner-card-footer {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 13px; color: var(--text-secondary);
+}
+
+.runner-card-followers {
+    font-size: 13px;
+}
+
+.runner-card-following-badge {
+    font-size: 12px; color: var(--primary);
+    background: rgba(0, 212, 255, 0.1);
+    padding: 2px 8px; border-radius: 10px;
+}
+
+.runner-card-profile-btn {
+    font-size: 13px; padding: 4px 12px;
+}

@@ -140,6 +140,125 @@ async def user_exists(user_id: UUID) -> bool:
     return bool(row)
 
 
+async def search_public_profiles(
+    viewer_id: UUID,
+    q: Optional[str] = None,
+    city: Optional[str] = None,
+    club: Optional[str] = None,
+    limit: int = 20,
+    cursor: Optional[str] = None,
+) -> dict:
+    """Search public profiles with cursor pagination.
+
+    Returns {"items": [...], "next_cursor": ...}.
+    Cursor encodes (coalesce(lower(display_name), ''), user_id).
+    """
+    import base64, binascii
+
+    SORT_KEY_EXPR = "coalesce(lower(p.display_name), '')"
+
+    def _encode_cursor(sort_key: str, uid: UUID) -> str:
+        payload = json.dumps({"s": sort_key, "u": str(uid)})
+        return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+    def _decode_cursor(cur: str) -> tuple[str, UUID]:
+        try:
+            padded = cur + "=" * ((4 - len(cur) % 4) % 4)
+            decoded = base64.b64decode(padded.encode(), altchars=b"-_", validate=True)
+            data = json.loads(decoded)
+            if not isinstance(data, dict) or set(data.keys()) != {"s", "u"}:
+                raise ValueError("Invalid cursor structure")
+            if not isinstance(data["s"], str):
+                raise ValueError("Invalid cursor sort key type")
+            if not isinstance(data["u"], str):
+                raise ValueError("Invalid cursor user_id type")
+            UUID(data["u"])
+            return data["s"], UUID(data["u"])
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError, binascii.Error) as exc:
+            if "Invalid cursor" in str(exc):
+                raise
+            raise ValueError("Invalid cursor")
+
+    conditions = [
+        "u.is_active = true",
+        "p.is_public = true",
+        "u.id != $1",
+    ]
+    params: list = [viewer_id]
+    idx = 2
+
+    if q is not None:
+        conditions.append(f"lower(p.display_name) LIKE ${idx}")
+        params.append(f"%{q.lower()}%")
+        idx += 1
+
+    if city is not None:
+        conditions.append(f"lower(p.city) = ${idx}")
+        params.append(city.lower())
+        idx += 1
+
+    if club is not None:
+        conditions.append(f"lower(p.club_name) LIKE ${idx}")
+        params.append(f"%{club.lower()}%")
+        idx += 1
+
+    if cursor is not None:
+        cur_sort_key, cur_id = _decode_cursor(cursor)
+        conditions.append(f"({SORT_KEY_EXPR}, u.id) > (${idx}, ${idx + 1}::uuid)")
+        params.append(cur_sort_key)
+        params.append(cur_id)
+        idx += 2
+
+    where_clause = " AND ".join(conditions)
+
+    query = f"""
+        SELECT
+            u.id AS user_id,
+            {SORT_KEY_EXPR} AS _sort_key,
+            p.display_name,
+            p.avatar_url,
+            p.city,
+            p.club_name,
+            p.bio,
+            (SELECT COUNT(*) FROM public.follows WHERE following_id = u.id) AS followers_count,
+            EXISTS(
+                SELECT 1 FROM public.follows
+                WHERE follower_id = $1 AND following_id = u.id
+            ) AS is_following
+        FROM public.users u
+        JOIN public.profiles p ON p.user_id = u.id
+        WHERE {where_clause}
+        ORDER BY {SORT_KEY_EXPR}, u.id
+        LIMIT ${idx}
+    """
+    params.append(limit + 1)
+
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+
+    has_more = len(rows) > limit
+    items_raw = [dict(r) for r in rows[:limit]]
+
+    # Remove internal _sort_key from response
+    items = []
+    for item in items_raw:
+        sort_key = item.pop("_sort_key", "")
+        item["_sort_key"] = sort_key
+        items.append(item)
+
+    next_cursor = None
+    if has_more and items:
+        last = items[-1]
+        next_cursor = _encode_cursor(last["_sort_key"], last["user_id"])
+
+    # Strip _sort_key from returned items
+    for item in items:
+        item.pop("_sort_key", None)
+
+    return {"items": items, "next_cursor": next_cursor}
+
+
 async def update_profile_fields(user_id: UUID, fields: dict) -> dict:
     """Partially update a profile. Only provided keys are written.
 
