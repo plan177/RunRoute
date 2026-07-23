@@ -2289,26 +2289,48 @@ async def test_list_lobbies_db_error_returns_safe_500(caplog):
     _clear_rate_limit()
     from backend.main import app
     init_data = _make_init_data()
+
+    # Unique sensitive values to verify they don't leak
+    secret_sql = "SELECT secret_column FROM secret_table WHERE id = 42"
+    secret_org_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    secret_tg_username = "leaked_username_98765"
+    secret_tg_userid = "999888777"
+    secret_cursor = "ZXZpbF9jdXJzb3I"
+    secret_db_url = "postgres://admin:s3cret_p@ssw0rd@db-secret-host:5432/runroute"
+
+    exc_msg = f"{secret_sql}; org={secret_org_uuid}; tg={secret_tg_username}/{secret_tg_userid}; cursor={secret_cursor}; url={secret_db_url}"
+
     with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
          patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
-         patch("backend.main.list_lobbies", side_effect=Exception("password=secret host=db:5432")):
+         patch("backend.main.list_lobbies", side_effect=RuntimeError(exc_msg)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.get("/api/lobbies?organizer_id=00000000-0000-0000-0000-000000000001",
+            resp = await c.get("/api/lobbies?organizer_id=" + secret_org_uuid,
                                headers={"X-Telegram-Init-Data": init_data})
-            # Status is 500
+
+            # Status is strictly 500
             assert resp.status_code == 500
-            # Detail is generic
-            body = resp.json()
-            assert body.get("detail") == "Internal server error" or "error" in body
-            # Caplog contains action and error_type
-            assert "Failed to list lobbies" in caplog.text or "error_type" in caplog.text
-            # Caplog does NOT contain sensitive data
-            assert "password=secret" not in caplog.text
-            assert "host=db:5432" not in caplog.text
+
+            # Detail is strictly generic
+            assert resp.json()["detail"] == "Internal server error"
+
+            # Caplog contains action message and error_type
+            assert "Failed to list lobbies" in caplog.text
+            assert "error_type" in caplog.text
+            assert "RuntimeError" in caplog.text
+
+            # Caplog does NOT contain any secret values
+            assert "secret_column" not in caplog.text
+            assert "secret_table" not in caplog.text
             assert "SELECT" not in caplog.text
-            assert "organizer_id" not in caplog.text or "organizer_id" not in caplog.text.lower().replace("error_type", "")
-            assert "telegram_user_id" not in caplog.text
+            assert secret_org_uuid not in caplog.text
+            assert secret_tg_username not in caplog.text
+            assert secret_tg_userid not in caplog.text
+            assert secret_cursor not in caplog.text
+            assert "s3cret_p@ssw0rd" not in caplog.text
+            assert "admin" not in caplog.text
+            assert "db-secret-host" not in caplog.text
             assert "DATABASE_URL" not in caplog.text
+            assert exc_msg not in caplog.text
 
 
 @pytest.mark.asyncio
