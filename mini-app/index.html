@@ -560,6 +560,16 @@
                         <span id="public-following-count">0</span> подписок
                     </div>
                 </div>
+                <div id="public-profile-lobbies-section" class="hidden">
+                    <div class="pp-lobbies-header">Предстоящие пробежки</div>
+                    <div id="pp-lobbies-loading" class="profile-loading hidden">
+                        <div class="skeleton skeleton-line"></div>
+                        <div class="skeleton skeleton-line short"></div>
+                    </div>
+                    <div id="pp-lobbies-items"></div>
+                    <div id="pp-lobbies-empty" class="hidden">Нет предстоящих пробежек</div>
+                    <div id="pp-lobbies-status" class="profile-status hidden"></div>
+                </div>
                 <div id="public-profile-follow-area" class="profile-follow-area">
                     <button id="public-follow-btn" class="modal-btn primary"></button>
                 </div>
@@ -758,6 +768,7 @@
     <script src="public-profile-utils.js"></script>
     <script src="lobby-utils.js"></script>
     <script src="lobby-controller.js"></script>
+    <script src="public-profile-lobbies.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

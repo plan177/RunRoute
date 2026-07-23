@@ -2126,3 +2126,54 @@ body {
 .lobby-point-actions {
     display: flex; gap: 8px; margin-bottom: 4px;
 }
+
+/* Public Profile Lobbies */
+
+.pp-lobbies-header {
+    font-size: 14px; font-weight: 600; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin: 16px 0 8px;
+    padding-top: 16px; border-top: 1px solid var(--glass-border);
+}
+
+.pp-lobby-card {
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    touch-action: manipulation;
+}
+
+.pp-lobby-card:active { border-color: var(--primary); }
+
+.pp-lobby-card-title {
+    font-size: 15px; font-weight: 600; color: var(--text);
+    margin-bottom: 4px; word-break: break-word;
+}
+
+.pp-lobby-card-date {
+    font-size: 13px; color: var(--text-secondary);
+    margin-bottom: 2px;
+}
+
+.pp-lobby-card-type {
+    font-size: 12px; color: var(--accent);
+    display: inline-block; margin-bottom: 4px;
+}
+
+.pp-lobby-card-place {
+    font-size: 13px; color: var(--text-secondary);
+    margin-bottom: 2px;
+}
+
+.pp-lobby-card-dist {
+    font-size: 12px; color: var(--text-secondary);
+}
+
+.pp-lobby-card-participants {
+    font-size: 12px; color: var(--text-secondary);
+    margin-top: 4px;
+}

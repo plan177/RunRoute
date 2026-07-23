@@ -2685,11 +2685,14 @@ async function openPublicProfile(userId) {
 
         loading.classList.add('hidden');
         content.classList.remove('hidden');
+
+        RunRoutePublicProfileLobbies.load(userId);
     } catch (e) {
         loading.classList.add('hidden');
         safeSetText(status, e.message === 'not_found' ? 'Профиль не найден' : 'Ошибка загрузки');
         status.className = 'profile-status error';
         status.classList.remove('hidden');
+        RunRoutePublicProfileLobbies.invalidate();
     }
 }
 
@@ -2792,10 +2795,10 @@ function initPublicProfile() {
     const modal = document.getElementById('public-profile-modal');
     const closeBtn = document.getElementById('public-profile-close');
 
-    closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
-    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+    closeBtn.addEventListener('click', () => { modal.classList.add('hidden'); RunRoutePublicProfileLobbies.invalidate(); });
+    modal.addEventListener('click', (e) => { if (e.target === modal) { modal.classList.add('hidden'); RunRoutePublicProfileLobbies.invalidate(); } });
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !modal.classList.contains('hidden')) modal.classList.add('hidden');
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) { modal.classList.add('hidden'); RunRoutePublicProfileLobbies.invalidate(); }
     });
 }
 

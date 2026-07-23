@@ -69,6 +69,7 @@ def _build_list_query(
     status: str,
     limit: int,
     cursor: Optional[str],
+    organizer_id: Optional[UUID] = None,
 ) -> tuple[str, list]:
     conditions = ["l.status = $1"]
     params: list = [status]
@@ -77,6 +78,11 @@ def _build_list_query(
     conditions.append(f"l.starts_at >= ${idx}")
     params.append(from_dt)
     idx += 1
+
+    if organizer_id is not None:
+        conditions.append(f"l.organizer_id = ${idx}")
+        params.append(organizer_id)
+        idx += 1
 
     if city is not None:
         conditions.append(f"l.city = ${idx}")
@@ -265,11 +271,12 @@ async def list_lobbies(
     to_dt: Optional[datetime] = None,
     limit: int = 20,
     cursor: Optional[str] = None,
+    organizer_id: Optional[UUID] = None,
 ) -> dict:
     if from_dt is None:
         from_dt = datetime.now(timezone.utc)
 
-    sql, params = _build_list_query(city, run_type, from_dt, to_dt, "open", limit, cursor)
+    sql, params = _build_list_query(city, run_type, from_dt, to_dt, "open", limit, cursor, organizer_id)
     pool = get_db_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(sql, *params)

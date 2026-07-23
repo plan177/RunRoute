@@ -2119,3 +2119,230 @@ async def test_get_lobby_viewer_state_no_membership():
             assert body["viewer_role"] is None
             assert body["can_join"] is True
             assert body["can_leave"] is False
+
+
+# --- organizer_id tests for GET /api/lobbies ---
+
+@pytest.mark.asyncio
+async def test_list_lobbies_organizer_id_passed_to_service():
+    """organizer_id is passed from endpoint to list_lobbies."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.list_lobbies", new_callable=lambda: AsyncMock(return_value={"items": [], "next_cursor": None})) as ml:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            await c.get("/api/lobbies?organizer_id=00000000-0000-0000-0000-000000000002", headers={"X-Telegram-Init-Data": init_data})
+        assert ml.call_args[1]["organizer_id"] == UUID("00000000-0000-0000-0000-000000000002")
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_organizer_id_none_by_default():
+    """Without organizer_id, the param is None."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.list_lobbies", new_callable=lambda: AsyncMock(return_value={"items": [], "next_cursor": None})) as ml:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            await c.get("/api/lobbies", headers={"X-Telegram-Init-Data": init_data})
+        assert ml.call_args[1]["organizer_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_invalid_organizer_id_returns_422():
+    """Non-UUID organizer_id returns 422."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/lobbies?organizer_id=not-a-uuid", headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_no_auth_returns_401():
+    """Request without auth returns 401."""
+    _clear_rate_limit()
+    from backend.main import app
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        assert (await c.get("/api/lobbies?organizer_id=00000000-0000-0000-0000-000000000001")).status_code == 401
+
+
+def test_build_list_query_organizer_id_condition():
+    """_build_list_query adds organizer_id condition."""
+    from backend.lobbies import _build_list_query
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    org_id = uuid4()
+    sql, params = _build_list_query(None, None, datetime.now(timezone.utc), None, "open", 20, None, organizer_id=org_id)
+    assert "l.organizer_id = $" in sql and org_id in params
+
+
+def test_build_list_query_organizer_id_no_condition_when_none():
+    """_build_list_query skips organizer_id when None."""
+    from backend.lobbies import _build_list_query
+    from datetime import datetime, timezone
+    sql, params = _build_list_query(None, None, datetime.now(timezone.utc), None, "open", 20, None, organizer_id=None)
+    assert "WHERE" in sql
+    where_clause = sql.split("WHERE")[1]
+    assert "l.organizer_id =" not in where_clause
+
+
+def test_build_list_query_organizer_id_with_city():
+    """organizer_id works together with city."""
+    from backend.lobbies import _build_list_query
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    org_id = uuid4()
+    sql, params = _build_list_query("Moscow", None, datetime.now(timezone.utc), None, "open", 20, None, organizer_id=org_id)
+    assert "l.organizer_id = $" in sql and "l.city = $" in sql and org_id in params and "Moscow" in params
+
+
+def test_build_list_query_organizer_id_with_run_type():
+    """organizer_id works together with run_type."""
+    from backend.lobbies import _build_list_query
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    org_id = uuid4()
+    sql, params = _build_list_query(None, "tempo", datetime.now(timezone.utc), None, "open", 20, None, organizer_id=org_id)
+    assert "l.organizer_id = $" in sql and "l.run_type = $" in sql
+
+
+def test_build_list_query_organizer_id_with_cursor():
+    """organizer_id works together with cursor."""
+    from backend.lobbies import _build_list_query, _encode_cursor
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    org_id = uuid4()
+    cursor_ts = datetime(2027, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+    cursor_id = uuid4()
+    cursor = _encode_cursor(cursor_ts, str(cursor_id))
+    sql, params = _build_list_query(None, None, datetime.now(timezone.utc), None, "open", 20, cursor, organizer_id=org_id)
+    assert "l.organizer_id = $" in sql and "(l.starts_at, l.id) >" in sql
+
+
+def test_build_list_query_organizer_id_preserves_limit_plus_one():
+    """limit+1 is preserved at the end."""
+    from backend.lobbies import _build_list_query
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    org_id = uuid4()
+    sql, params = _build_list_query(None, None, datetime.now(timezone.utc), None, "open", 20, None, organizer_id=org_id)
+    assert params[-1] == 21
+
+
+def test_build_list_query_organizer_id_preserves_ordering():
+    """ORDER BY starts_at ASC, id ASC is preserved."""
+    from backend.lobbies import _build_list_query
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    org_id = uuid4()
+    sql, _ = _build_list_query(None, None, datetime.now(timezone.utc), None, "open", 20, None, organizer_id=org_id)
+    assert "ORDER BY l.starts_at ASC, l.id ASC" in sql
+
+
+def test_build_list_query_organizer_id_preserves_status_open():
+    """status = open condition is preserved."""
+    from backend.lobbies import _build_list_query
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    org_id = uuid4()
+    sql, _ = _build_list_query(None, None, datetime.now(timezone.utc), None, "open", 20, None, organizer_id=org_id)
+    assert "l.status = $1" in sql
+
+
+def test_build_list_query_organizer_id_preserves_starts_at_from():
+    """starts_at >= condition is preserved."""
+    from backend.lobbies import _build_list_query
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    org_id = uuid4()
+    sql, _ = _build_list_query(None, None, datetime.now(timezone.utc), None, "open", 20, None, organizer_id=org_id)
+    assert "l.starts_at >= $" in sql
+
+
+def test_build_list_query_organizer_id_separate_param():
+    """organizer_id is passed as a separate SQL parameter."""
+    from backend.lobbies import _build_list_query
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    org_id = uuid4()
+    sql, params = _build_list_query(None, None, datetime.now(timezone.utc), None, "open", 20, None, organizer_id=org_id)
+    org_idx = params.index(org_id)
+    assert org_idx >= 1
+    # The WHERE clause with l.organizer_id should be the main WHERE, not in a subquery
+    # Use regex to find l.organizer_id = $N outside of subqueries
+    import re
+    match = re.search(r'l\.organizer_id\s*=\s*\$(\d+)', sql)
+    assert match is not None
+    # SQL params are 1-based, params list is 0-based
+    assert int(match.group(1)) == org_idx + 1
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_db_error_returns_safe_500(caplog):
+    """DB error returns generic 500 and does not leak SQL/PII."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.list_lobbies", side_effect=Exception("password=secret host=db:5432")):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/lobbies?organizer_id=00000000-0000-0000-0000-000000000001",
+                               headers={"X-Telegram-Init-Data": init_data})
+            assert resp.status_code == 500 and "password=secret" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_organizer_id_no_telegram_pii():
+    """Response does not contain Telegram PII."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.list_lobbies", new_callable=lambda: AsyncMock(return_value={"items": [_mock_lobby_item()], "next_cursor": None})):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            item = (await c.get("/api/lobbies?organizer_id=00000000-0000-0000-0000-000000000001",
+                                headers={"X-Telegram-Init-Data": init_data})).json()["items"][0]
+            for k in ("telegram_user_id", "first_name", "last_name", "telegram_username"):
+                assert k not in item
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_organizer_id_with_from_date():
+    """organizer_id works together with explicit from date."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.list_lobbies", new_callable=lambda: AsyncMock(return_value={"items": [], "next_cursor": None})) as ml:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            await c.get("/api/lobbies?organizer_id=00000000-0000-0000-0000-000000000002&from=2027-06-01T00:00:00Z",
+                        headers={"X-Telegram-Init-Data": init_data})
+        kwargs = ml.call_args[1]
+        assert kwargs["organizer_id"] == UUID("00000000-0000-0000-0000-000000000002")
+        assert kwargs["from_dt"] is not None
+
+
+@pytest.mark.asyncio
+async def test_list_lobbies_organizer_id_with_to_date():
+    """organizer_id works together with to date."""
+    _clear_rate_limit()
+    from backend.main import app
+    init_data = _make_init_data()
+    with patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=lambda: AsyncMock(return_value=_mock_user())), \
+         patch("backend.main.list_lobbies", new_callable=lambda: AsyncMock(return_value={"items": [], "next_cursor": None})) as ml:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            await c.get("/api/lobbies?organizer_id=00000000-0000-0000-0000-000000000002&to=2027-12-31T23:59:59Z",
+                        headers={"X-Telegram-Init-Data": init_data})
+        kwargs = ml.call_args[1]
+        assert kwargs["organizer_id"] == UUID("00000000-0000-0000-0000-000000000002")
+        assert kwargs["to_dt"] is not None

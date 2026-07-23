@@ -509,6 +509,7 @@ async def list_lobbies_endpoint(
     to_date: Optional[str] = Query(None, alias="to"),
     limit: int = Query(20, ge=1, le=100),
     cursor: Optional[str] = Query(None, max_length=2048),
+    organizer_id: Optional[UUID] = Query(None),
     telegram_user: dict = Depends(get_current_telegram_user),
 ):
     try:
@@ -545,6 +546,7 @@ async def list_lobbies_endpoint(
             to_dt=to_dt,
             limit=limit,
             cursor=cursor,
+            organizer_id=organizer_id,
         )
         return result
     except HTTPException:
