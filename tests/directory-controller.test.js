@@ -494,38 +494,73 @@ describe('stale response after filter change ignored', () => {
 });
 
 describe('stale response after resp.json() ignored', () => {
-    it('first call invalidated by token check, only new data rendered', async () => {
-        let fetchResolvers = [];
+    it('deferred json of old response resolved after new data renders', async () => {
+        let callCount = 0;
+        let firstJsonCalled = false;
+        let firstJsonResolved = false;
+        let firstJsonResolver = null;
+
         const fetchMock = () => {
-            return new Promise(r => { fetchResolvers.push(r); });
+            callCount++;
+            if (callCount === 1) {
+                // First fetch resolves immediately, but json() is deferred
+                return Promise.resolve({
+                    ok: true,
+                    json: () => {
+                        firstJsonCalled = true;
+                        return new Promise(resolve => { firstJsonResolver = resolve; });
+                    }
+                });
+            }
+            // Second fetch resolves immediately with resolved json
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({
+                    items: [{ user_id: 'new', display_name: 'New', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 0, is_following: false }],
+                    next_cursor: 'new-cursor'
+                })
+            });
         };
+
         const { runners, doc } = createDirectoryVM(fetchMock);
 
+        // 1. First fetch returns immediately; json() deferred
         const p1 = runners.loadRunnerList(true);
-        const p2 = runners.loadRunnerList(true);
 
-        // Both fetches deferred. Resolve second first (fast), first second (slow).
-        // When first resolves, token check fails because second already incremented token.
-        fetchResolvers[1]({ ok: true, json: () => Promise.resolve({
-            items: [{ user_id: 'new', display_name: 'New', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 0, is_following: false }],
-            next_cursor: 'new-cursor'
-        }) });
-
+        // 2. Wait for microtasks: fetch resolved, token check passed, json() called but awaiting
         await new Promise(r => setTimeout(r, 10));
 
-        // First fetch resolves, but token check will fail
-        fetchResolvers[0]({ ok: true, json: () => Promise.resolve({
-            items: [{ user_id: 'stale', display_name: 'Stale', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 0, is_following: false }],
-            next_cursor: 'stale-cursor'
-        }) });
+        // 3. Confirm first request reached await resp.json()
+        assert.ok(firstJsonCalled, 'first response.json() was called');
 
-        await Promise.all([p1, p2]);
+        // 4. Start second loadRunnerList(true) — token incremented
+        const p2 = runners.loadRunnerList(true);
+
+        // 5-6. Second fetch + json complete immediately with new data; wait for render
+        await new Promise(r => setTimeout(r, 10));
 
         const itemsEl = doc.getElementById('runners-list-items');
+        const idsAfterNew = itemsEl._children.map(c => c.dataset.userId);
+        assert.ok(idsAfterNew.includes('new'), 'new item rendered by second request');
+        assert.equal(runners._nextCursor, 'new-cursor', 'cursor from second response');
+
+        // 7. Only now resolve the first (stale) response's deferred json
+        firstJsonResolved = true;
+        firstJsonResolver({
+            items: [{ user_id: 'old', display_name: 'Old', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 0, is_following: false }],
+            next_cursor: 'old-cursor'
+        });
+
+        // 8. Wait for both production calls to finish
+        await Promise.all([p1, p2]);
+
+        // 9. Assertions
         const ids = itemsEl._children.map(c => c.dataset.userId);
         assert.ok(ids.includes('new'), 'new item present');
-        assert.ok(!ids.includes('stale'), 'stale item rejected by token check');
-        assert.equal(runners._nextCursor, 'new-cursor', 'cursor from new response only');
+        assert.ok(!ids.includes('old'), 'old item rejected by token check after json()');
+        assert.equal(runners._nextCursor, 'new-cursor', 'cursor still from second response');
+        assert.ok(firstJsonCalled, 'first response.json() was called');
+        assert.ok(firstJsonResolved, 'first response.json() was resolved after new data');
     });
 });
 
