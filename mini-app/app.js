@@ -2642,6 +2642,8 @@ async function openPublicProfile(userId) {
     content.classList.add('hidden');
     status.classList.add('hidden');
 
+    RunRoutePublicProfileLobbies.invalidate();
+
     if (!isTelegramApp()) {
         loading.classList.add('hidden');
         safeSetText(status, 'Доступно только внутри Telegram');

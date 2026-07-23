@@ -184,6 +184,9 @@
     }
 
     function openLobby(lobbyId) {
+        var modal = _el('public-profile-modal');
+        if (modal) modal.classList.add('hidden');
+        invalidate();
         RunRouteLobby.openLobbyPanel();
         RunRouteLobby.openLobbyDetail(lobbyId);
     }

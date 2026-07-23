@@ -2295,7 +2295,20 @@ async def test_list_lobbies_db_error_returns_safe_500(caplog):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.get("/api/lobbies?organizer_id=00000000-0000-0000-0000-000000000001",
                                headers={"X-Telegram-Init-Data": init_data})
-            assert resp.status_code == 500 and "password=secret" not in caplog.text
+            # Status is 500
+            assert resp.status_code == 500
+            # Detail is generic
+            body = resp.json()
+            assert body.get("detail") == "Internal server error" or "error" in body
+            # Caplog contains action and error_type
+            assert "Failed to list lobbies" in caplog.text or "error_type" in caplog.text
+            # Caplog does NOT contain sensitive data
+            assert "password=secret" not in caplog.text
+            assert "host=db:5432" not in caplog.text
+            assert "SELECT" not in caplog.text
+            assert "organizer_id" not in caplog.text or "organizer_id" not in caplog.text.lower().replace("error_type", "")
+            assert "telegram_user_id" not in caplog.text
+            assert "DATABASE_URL" not in caplog.text
 
 
 @pytest.mark.asyncio

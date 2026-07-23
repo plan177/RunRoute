@@ -244,10 +244,23 @@ describe('Error stays within lobbies section', () => {
         const fetchMock = () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
         const { api, doc } = createVM(fetchMock);
 
+        // Make public-profile-content visible first
+        const content = doc.getElementById('public-profile-content');
+        content.classList.remove('hidden');
+
         await api.load('00000000-0000-0000-0000-000000000001');
 
+        // Error is within lobbies section only
         assert.ok(!doc.getElementById('pp-lobbies-status').classList.has('hidden'));
         assert.equal(doc.getElementById('pp-lobbies-status').className, 'profile-status error');
+
+        // public-profile-content is still visible
+        assert.ok(!content.classList.has('hidden'), 'public-profile-content still visible');
+
+        // Generic error text, not raw API error
+        const statusText = doc.getElementById('pp-lobbies-status').textContent;
+        assert.ok(statusText.includes('\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c'), 'generic error text');
+        assert.ok(!statusText.includes('500'), 'no raw status code');
     });
 });
 
@@ -295,36 +308,50 @@ describe('No Telegram PII used', () => {
     });
 });
 
-describe('Card click opens lobby panel and detail', () => {
-    it('openLobby calls openLobbyPanel and openLobbyDetail', async () => {
-        let panelOpened = false;
-        let detailId = null;
-        const { api } = createVM(
-            () => Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) }),
-            {
-                openLobbyPanel: function () { panelOpened = true; },
-                openLobbyDetail: function (id) { detailId = id; },
-            }
-        );
-
-        api.openLobby('lobby-42');
-        assert.ok(panelOpened, 'openLobbyPanel called');
-        assert.equal(detailId, 'lobby-42');
-    });
-
-    it('openLobby does not call join/leave API', async () => {
+describe('Card click via production renderer', () => {
+    it('renders card, click closes modal and opens lobby', async () => {
+        let panelOpened = 0;
+        let detailIds = [];
         let fetchCalls = [];
+        let invalidateCalled = 0;
+
         const fetchMock = (url) => {
             fetchCalls.push(url);
-            return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [
+                { id: 'lobby-42', title: 'Test Run', run_type: 'easy', starts_at: '2027-12-01T09:00:00+03:00', city: 'Moscow', area_label: null, distance_m: 5000, participant_count: 3, capacity: 10 }
+            ] }) });
         };
-        let detailId = null;
-        const { api } = createVM(fetchMock, {
-            openLobbyDetail: function (id) { detailId = id; },
+
+        const { api, doc } = createVM(fetchMock, {
+            openLobbyPanel: function () { panelOpened++; },
+            openLobbyDetail: function (id) { detailIds.push(id); },
         });
 
-        fetchCalls = [];
-        api.openLobby('lobby-99');
+        // Render a card via load
+        await api.load('user-1');
+
+        // Find the rendered card and verify it has the correct data
+        const itemsEl = doc.getElementById('pp-lobbies-items');
+        assert.equal(itemsEl._children.length, 1, 'one card rendered');
+        const card = itemsEl._children[0];
+        assert.equal(card.dataset.lobbyId, 'lobby-42', 'card has lobbyId');
+        assert.ok(collectText(card).includes('Test Run'), 'card shows title');
+
+        // Ensure public-profile-modal is visible before click
+        const modal = doc.getElementById('public-profile-modal');
+        modal.classList.remove('hidden');
+
+        // Click the card
+        card.click();
+
+        // Verify: modal closed
+        assert.ok(modal.classList.contains('hidden'), 'modal closed after card click');
+
+        // Verify: lobby panel and detail opened
+        assert.equal(panelOpened, 1, 'openLobbyPanel called once');
+        assert.deepEqual(detailIds, ['lobby-42'], 'openLobbyDetail called with correct id');
+
+        // Verify: no join/leave fetch calls
         assert.ok(!fetchCalls.some(u => u.includes('/join')), 'no join call');
         assert.ok(!fetchCalls.some(u => u.includes('/leave')), 'no leave call');
     });
@@ -351,15 +378,21 @@ describe('Race: second profile open ignores first response', () => {
         await new Promise(r => setTimeout(r, 10));
 
         const itemsEl = doc.getElementById('pp-lobbies-items');
-        assert.equal(itemsEl._children.length, 1, 'new data rendered');
+        assert.equal(itemsEl._children.length, 1, 'exactly one card');
 
         // Resolve first (stale)
         resolvers[0]({ ok: true, json: () => Promise.resolve({ items: [{ id: 'l-old', title: 'Old' }] }) });
         await Promise.all([p1, p2]);
 
-        // Old should not appear
-        const texts = itemsEl._children.map(c => collectText(c));
-        assert.ok(!texts.some(t => t.includes('l-old')), 'old data not rendered');
+        // Assertions by dataset.lobbyId and title text
+        assert.equal(itemsEl._children.length, 1, 'still one card after stale');
+        assert.equal(itemsEl._children[0].dataset.lobbyId, 'l-new', 'card is new');
+        assert.ok(collectText(itemsEl).includes('New'), 'text contains New');
+        assert.ok(!collectText(itemsEl).includes('Old'), 'text does not contain Old');
+
+        // States not corrupted
+        assert.ok(doc.getElementById('pp-lobbies-loading').classList.contains('hidden'), 'loading hidden');
+        assert.ok(doc.getElementById('pp-lobbies-empty').classList.contains('hidden'), 'empty hidden');
     });
 });
 
@@ -367,6 +400,7 @@ describe('Delayed resp.json() race', () => {
     it('deferred json of old response resolved after new data renders', async () => {
         let callCount = 0;
         let firstJsonCalled = false;
+        let firstJsonPending = false;
         let firstJsonResolver = null;
 
         const fetchMock = () => {
@@ -376,7 +410,10 @@ describe('Delayed resp.json() race', () => {
                     ok: true,
                     json: () => {
                         firstJsonCalled = true;
-                        return new Promise(resolve => { firstJsonResolver = resolve; });
+                        firstJsonPending = true;
+                        return new Promise(resolve => {
+                            firstJsonResolver = (data) => { firstJsonPending = false; resolve(data); };
+                        });
                     }
                 });
             }
@@ -389,20 +426,33 @@ describe('Delayed resp.json() race', () => {
 
         const p1 = api.load('user-1');
         await new Promise(r => setTimeout(r, 10));
+
+        // Confirm first json() was called and is pending
         assert.ok(firstJsonCalled, 'first json() called');
+        assert.ok(firstJsonPending, 'first json() still pending');
 
         const p2 = api.load('user-2');
         await new Promise(r => setTimeout(r, 10));
 
         const itemsEl = doc.getElementById('pp-lobbies-items');
-        assert.equal(itemsEl._children.length, 1, 'new data rendered');
 
-        // Resolve stale json
+        // New response fully rendered first
+        assert.equal(itemsEl._children.length, 1, 'one card rendered');
+        assert.equal(itemsEl._children[0].dataset.lobbyId, 'l-new', 'card is new');
+        assert.ok(collectText(itemsEl).includes('New'), 'text contains New');
+        assert.ok(!collectText(itemsEl).includes('Old'), 'text does not contain Old');
+
+        // Only then resolve old json
         firstJsonResolver({ items: [{ id: 'l-old', title: 'Old' }] });
+        assert.ok(!firstJsonPending, 'old json resolved');
+
         await Promise.all([p1, p2]);
 
-        const texts = itemsEl._children.map(c => collectText(c));
-        assert.ok(!texts.some(t => t.includes('l-old')), 'stale data not rendered');
+        // After both complete, still the new card
+        assert.equal(itemsEl._children.length, 1, 'still one card');
+        assert.equal(itemsEl._children[0].dataset.lobbyId, 'l-new', 'card still new');
+        assert.ok(collectText(itemsEl).includes('New'), 'text still contains New');
+        assert.ok(!collectText(itemsEl).includes('Old'), 'old not rendered');
     });
 });
 
@@ -434,6 +484,39 @@ describe('Invalidation after modal close', () => {
 
         api.invalidate();
         assert.ok(doc.getElementById('public-profile-lobbies-section').classList.has('hidden'));
+    });
+});
+
+describe('Lifecycle: invalidate at start of new profile', () => {
+    it('opening profile B invalidates pending A', async () => {
+        let resolvers = [];
+        const fetchMock = () => {
+            return new Promise(r => { resolvers.push(r); });
+        };
+        const { api, doc } = createVM(fetchMock);
+
+        // Start loading profile A's lobbies
+        const pA = api.load('user-A');
+        await new Promise(r => setTimeout(r, 5));
+
+        // Simulate opening profile B (invalidate called at start of openPublicProfile)
+        api.invalidate();
+
+        // A's response arrives late
+        resolvers[0]({ ok: true, json: () => Promise.resolve({ items: [{ id: 'l-a', title: 'A Lobby' }] }) });
+        await pA;
+
+        // A's data must not appear
+        const itemsEl = doc.getElementById('pp-lobbies-items');
+        assert.equal(itemsEl._children.length, 0, 'A lobby not rendered');
+
+        // Now load B normally
+        const pB = api.load('user-B');
+        resolvers[1]({ ok: true, json: () => Promise.resolve({ items: [{ id: 'l-b', title: 'B Lobby' }] }) });
+        await pB;
+
+        assert.equal(itemsEl._children.length, 1, 'B lobby rendered');
+        assert.equal(itemsEl._children[0].dataset.lobbyId, 'l-b', 'card is B');
     });
 });
 
