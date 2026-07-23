@@ -293,6 +293,49 @@ async def test_public_profiles_server_error_500():
 
 
 @pytest.mark.asyncio
+async def test_public_profiles_error_logging_safe(caplog):
+    """Error log must contain action and error_type but NOT SQL, filters, cursor, PII, or DB URL."""
+    from backend.main import app
+
+    _clear_rate_limit()
+    init_data = _make_init_data()
+
+    # The exception message contains sensitive data that must NOT leak
+    sensitive_msg = (
+        "SELECT * FROM users WHERE name='testuser' "
+        "AND q='search_term' AND cursor='abc123' "
+        "AND telegram_user_id=123456 "
+        "AND DATABASE_URL=postgres://secret:pass@host/db"
+    )
+
+    with caplog.at_level("ERROR"), \
+         patch("backend.auth.get_settings", return_value=_mock_auth_settings()), \
+         patch("backend.main.upsert_user", new_callable=AsyncMock, return_value=_mock_user()), \
+         patch("backend.main.search_public_profiles", new_callable=AsyncMock, side_effect=RuntimeError(sensitive_msg)):
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(
+                "/api/public-profiles?q=search_term&cursor=abc123",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+
+    assert resp.status_code == 500
+
+    # Verify safe log content
+    log_text = caplog.text
+    assert "Failed to search public profiles" in log_text
+    assert "error_type=RuntimeError" in log_text
+
+    # Verify sensitive data is NOT in logs
+    assert "testuser" not in log_text, "username leaked in logs"
+    assert "search_term" not in log_text, "search query leaked in logs"
+    assert "abc123" not in log_text, "cursor leaked in logs"
+    assert "123456" not in log_text, "telegram_user_id leaked in logs"
+    assert "postgres://" not in log_text, "DATABASE_URL leaked in logs"
+    assert "SELECT" not in log_text, "SQL leaked in logs"
+
+
+@pytest.mark.asyncio
 async def test_public_profiles_limit_bounds():
     from backend.main import app
 
@@ -528,12 +571,120 @@ class TestSearchBehavior:
         assert call_args.args[-1] == 11
 
     @pytest.mark.asyncio
+    async def test_mixed_case_two_pages(self):
+        """Two-page pagination: first page has Alice (display_name=Alice),
+        cursor encodes sort_key 'alice', second page uses it, no duplicates."""
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+        import base64, json as _json
+
+        uid1 = uuid4()
+        uid2 = uuid4()
+        uid3 = uuid4()
+
+        page1_rows = [
+            {"user_id": uid1, "_sort_key": "alice", "display_name": "Alice",
+             "avatar_url": None, "city": None, "club_name": None, "bio": None,
+             "followers_count": 0, "is_following": False},
+            {"user_id": uid2, "_sort_key": "bob", "display_name": "Bob",
+             "avatar_url": None, "city": None, "club_name": None, "bio": None,
+             "followers_count": 0, "is_following": False},
+            # Third row to trigger has_more with limit=2
+            {"user_id": uid3, "_sort_key": "charlie", "display_name": "Charlie",
+             "avatar_url": None, "city": None, "club_name": None, "bio": None,
+             "followers_count": 0, "is_following": False},
+        ]
+
+        page2_rows = [
+            {"user_id": uid3, "_sort_key": "charlie", "display_name": "Charlie",
+             "avatar_url": None, "city": None, "club_name": None, "bio": None,
+             "followers_count": 0, "is_following": False},
+        ]
+
+        mock_conn = AsyncMock()
+        mock_pool = MagicMock()
+        mock_acm = MagicMock()
+        mock_acm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acm.__aexit__ = AsyncMock(return_value=False)
+        mock_pool.acquire = MagicMock(return_value=mock_acm)
+
+        # First call: page 1
+        mock_conn.fetch = AsyncMock(return_value=page1_rows)
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            result1 = await search_public_profiles(viewer_id=uuid4(), limit=2)
+
+        assert len(result1["items"]) == 2
+        assert result1["items"][0]["display_name"] == "Alice"
+        assert result1["items"][1]["display_name"] == "Bob"
+        assert result1["next_cursor"] is not None
+
+        # Decode cursor: should contain sort_key "bob" (last item of page), not "alice"
+        padded = result1["next_cursor"] + "=" * ((4 - len(result1["next_cursor"]) % 4) % 4)
+        decoded = base64.b64decode(padded.encode(), altchars=b"-_", validate=True)
+        cursor_data = _json.loads(decoded)
+        assert cursor_data["s"] == "bob", f"cursor sort_key should be 'bob', got {cursor_data['s']!r}"
+        assert cursor_data["u"] == str(uid2)
+
+        # Second call: page 2 using the cursor
+        mock_conn.fetch = AsyncMock(return_value=page2_rows)
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            result2 = await search_public_profiles(
+                viewer_id=uuid4(), limit=2, cursor=result1["next_cursor"])
+
+        assert len(result2["items"]) == 1
+        assert result2["items"][0]["display_name"] == "Charlie"
+        assert result2["next_cursor"] is None  # no more pages
+
+        # Verify no duplicates between pages
+        page1_ids = {item["user_id"] for item in result1["items"]}
+        page2_ids = {item["user_id"] for item in result2["items"]}
+        assert page1_ids.isdisjoint(page2_ids), "pages should not have duplicate user_ids"
+
+    @pytest.mark.asyncio
+    async def test_same_display_name_tie_breaker_by_user_id(self):
+        """Same display_name sort keys are separated by user_id in cursor."""
+        from backend.profiles import search_public_profiles
+        from uuid import uuid4
+        import base64, json as _json
+
+        uid1 = uuid4()
+        uid2 = uuid4()
+
+        rows = [
+            {"user_id": uid1, "_sort_key": "alice", "display_name": "Alice",
+             "avatar_url": None, "city": None, "club_name": None, "bio": None,
+             "followers_count": 0, "is_following": False},
+            {"user_id": uid2, "_sort_key": "alice", "display_name": "Alice",
+             "avatar_url": None, "city": None, "club_name": None, "bio": None,
+             "followers_count": 0, "is_following": False},
+            # Third to trigger has_more
+            {"user_id": uuid4(), "_sort_key": "bob", "display_name": "Bob",
+             "avatar_url": None, "city": None, "club_name": None, "bio": None,
+             "followers_count": 0, "is_following": False},
+        ]
+
+        mock_pool, mock_conn = self._make_mock_pool(rows)
+        with patch("backend.profiles.get_db_pool", return_value=mock_pool):
+            result = await search_public_profiles(viewer_id=uuid4(), limit=2)
+
+        assert len(result["items"]) == 2
+        assert result["next_cursor"] is not None
+
+        # Decode cursor: user_id should be uid2 (last item of page with same name)
+        padded = result["next_cursor"] + "=" * ((4 - len(result["next_cursor"]) % 4) % 4)
+        decoded = base64.b64decode(padded.encode(), altchars=b"-_", validate=True)
+        cursor_data = _json.loads(decoded)
+        assert cursor_data["u"] == str(uid2), \
+            f"cursor user_id should be {uid2}, got {cursor_data['u']}"
+        assert cursor_data["s"] == "alice"
+
+    @pytest.mark.asyncio
     async def test_mixed_case_display_name_cursor(self):
+        """Cursor sort key is lowercased regardless of display_name casing."""
         from backend.profiles import search_public_profiles
         from uuid import uuid4
         import base64, json
 
-        # Create cursor with mixed-case sort key
         payload = json.dumps({"s": "alice", "u": "00000000-0000-0000-0000-000000000002"})
         cursor = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
 
@@ -542,8 +693,9 @@ class TestSearchBehavior:
             await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
 
         call_args = mock_conn.fetch.call_args
-        # Cursor sort key should be "alice" (lowercased)
-        assert "alice" in str(call_args)
+        sql_params = call_args.args[1:]
+        # The sort key "alice" should appear as a parameter
+        assert "alice" in sql_params, f"'alice' not found in SQL params: {sql_params}"
 
     @pytest.mark.asyncio
     async def test_null_display_name_cursor(self):
@@ -558,9 +710,15 @@ class TestSearchBehavior:
         with patch("backend.profiles.get_db_pool", return_value=mock_pool):
             await search_public_profiles(viewer_id=uuid4(), cursor=cursor)
 
+        # Extract the sort key parameter from the SQL call
         call_args = mock_conn.fetch.call_args
-        # Empty string sort key for NULL display_name
-        assert "" in str(call_args)
+        sql = call_args.args[0]
+        params = call_args.args[1:]
+        # Find the cursor condition parameter — it's the one after the WHERE clause
+        # The sort key is the second-to-last param (before the UUID and limit)
+        # Check that the params contain an empty string (the sort key)
+        sort_key_params = [p for p in params if isinstance(p, str)]
+        assert "" in sort_key_params, f"empty string sort key not found in params: {params}"
 
     @pytest.mark.asyncio
     async def test_next_cursor_uses_sort_key(self):

@@ -31,10 +31,58 @@ function createDirectoryVM(fetchMock, overrides) {
                     if (this._listeners[evt]) this._listeners[evt] = this._listeners[evt].filter(f => f !== fn);
                 },
                 click() { (this._listeners.click || []).forEach(fn => fn({ target: this })); },
-                appendChild(c) { this._children.push(c); return c; },
-                remove() {},
-                querySelector(sel) { return null; },
-                querySelectorAll() { return []; },
+                appendChild(c) { this._children.push(c); c._parent = this; return c; },
+                get firstChild() { return this._children[0] || null; },
+                get lastChild() { return this._children[this._children.length - 1] || null; },
+                get childNodes() { return this._children; },
+                insertBefore(newNode, refNode) {
+                    const idx = refNode ? this._children.indexOf(refNode) : this._children.length;
+                    this._children.splice(idx >= 0 ? idx : this._children.length, 0, newNode);
+                    newNode._parent = this;
+                    return newNode;
+                },
+                remove() {
+                    if (this._parent) {
+                        const idx = this._parent._children.indexOf(this);
+                        if (idx >= 0) this._parent._children.splice(idx, 1);
+                        this._parent = null;
+                    }
+                },
+                querySelector(sel) {
+                    function matchEl(el, sel) {
+                        if (sel.startsWith('.')) {
+                            const cls = sel.slice(1);
+                            return el.className && el.className.split(/\s+/).includes(cls);
+                        }
+                        if (sel.startsWith('[data-')) {
+                            const m = sel.match(/\[data-([a-z]+)(?:-([a-z]+))?="([^"]+)"\]/);
+                            if (m) { const k = m[2] ? m[1] + m[2] : m[1]; return el.dataset && el.dataset[k] === m[3]; }
+                        }
+                        return false;
+                    }
+                    function search(el, sel) {
+                        if (matchEl(el, sel)) return el;
+                        for (const child of (el._children || [])) { const f = search(child, sel); if (f) return f; }
+                        return null;
+                    }
+                    return search(this, sel);
+                },
+                querySelectorAll(sel) {
+                    const results = [];
+                    function matchEl(el, sel) {
+                        if (sel.startsWith('.')) {
+                            const cls = sel.slice(1);
+                            return el.className && el.className.split(/\s+/).includes(cls);
+                        }
+                        return false;
+                    }
+                    function search(el, sel) {
+                        if (matchEl(el, sel)) results.push(el);
+                        for (const child of (el._children || [])) search(child, sel);
+                    }
+                    search(this, sel);
+                    return results;
+                },
                 setAttribute(k, v) { this['_' + k] = v; },
             };
             // Make innerHTML setter clear _children
@@ -56,8 +104,22 @@ function createDirectoryVM(fetchMock, overrides) {
                 classList: { _hidden: new Set(), remove() {}, add() {}, has() { return false; } },
                 addEventListener(evt, fn) { if (!this._listeners[evt]) this._listeners[evt] = []; this._listeners[evt].push(fn); },
                 removeEventListener() {},
-                appendChild(c) { this._children.push(c); return c; },
+                appendChild(c) { this._children.push(c); c._parent = this; return c; },
+                get firstChild() { return this._children[0] || null; },
+                insertBefore(newNode, refNode) {
+                    const idx = refNode ? this._children.indexOf(refNode) : this._children.length;
+                    this._children.splice(idx >= 0 ? idx : this._children.length, 0, newNode);
+                    newNode._parent = this;
+                    return newNode;
+                },
                 click() { (this._listeners.click || []).forEach(fn => fn({ target: this })); },
+                remove() {
+                    if (this._parent) {
+                        const idx = this._parent._children.indexOf(this);
+                        if (idx >= 0) this._parent._children.splice(idx, 1);
+                        this._parent = null;
+                    }
+                },
                 setAttribute(k, v) { this['_' + k] = v; },
                 querySelector(sel) {
                     // Recursive selector matching
@@ -375,24 +437,7 @@ describe('double loadMore creates one fetch', () => {
 });
 
 describe('rejected fetch frees busy', () => {
-    it('busy cleared after error', async () => {
-        const fetchMock = () => Promise.reject(new Error('network'));
-        const { runners } = createDirectoryVM(fetchMock);
-
-        await runners.loadRunnerList(true);
-
-        // Should be able to call again
-        let fetchCalled = false;
-        const fetchMock2 = () => {
-            fetchCalled = true;
-            return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [], next_cursor: null }) });
-        };
-        const { runners: runners2 } = createDirectoryVM(fetchMock2);
-        // Use same runners instance - actually we need to test with the same instance
-        // Since busy is per-instance, let's test differently
-    });
-
-    it('busy freed after error allows retry', async () => {
+    it('busy freed after error allows retry on same instance', async () => {
         let callCount = 0;
         const fetchMock = () => {
             callCount++;
@@ -405,12 +450,12 @@ describe('rejected fetch frees busy', () => {
         assert.equal(callCount, 1);
 
         await runners.loadRunnerList(true);
-        assert.equal(callCount, 2, 'second fetch allowed');
+        assert.equal(callCount, 2, 'second fetch allowed after error');
     });
 });
 
 describe('stale response after filter change ignored', () => {
-    it('old response does not change DOM/cursor', async () => {
+    it('old response does not change DOM/cursor when new resolves first', async () => {
         let resolvers = [];
         let callCount = 0;
         const fetchMock = () => {
@@ -424,14 +469,18 @@ describe('stale response after filter change ignored', () => {
         doc.getElementById('runners-filter-q').value = 'new query';
         const p2 = runners.loadRunnerList(true);
 
-        resolvers[0]({ ok: true, json: () => Promise.resolve({
-            items: [{ user_id: 'old', display_name: 'Old', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 0, is_following: false }],
-            next_cursor: 'old-cursor'
-        }) });
-
+        // Resolve NEW response first (including its json)
         resolvers[1]({ ok: true, json: () => Promise.resolve({
             items: [{ user_id: 'new', display_name: 'New', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 0, is_following: false }],
             next_cursor: 'new-cursor'
+        }) });
+
+        await new Promise(r => setTimeout(r, 10));
+
+        // Then resolve OLD response (including its json)
+        resolvers[0]({ ok: true, json: () => Promise.resolve({
+            items: [{ user_id: 'old', display_name: 'Old', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 0, is_following: false }],
+            next_cursor: 'old-cursor'
         }) });
 
         await Promise.all([p1, p2]);
@@ -445,34 +494,38 @@ describe('stale response after filter change ignored', () => {
 });
 
 describe('stale response after resp.json() ignored', () => {
-    it('delayed json response does not change DOM', async () => {
-        let callCount = 0;
+    it('first call invalidated by token check, only new data rendered', async () => {
+        let fetchResolvers = [];
         const fetchMock = () => {
-            callCount++;
-            if (callCount === 1) {
-                // First fetch: slow json
-                return Promise.resolve({
-                    ok: true,
-                    json: () => new Promise(() => {}) // never resolves
-                });
-            }
-            // Second fetch: fast response
-            return Promise.resolve({ ok: true, json: () => Promise.resolve({
-                items: [{ user_id: 'new', display_name: 'New', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 0, is_following: false }],
-                next_cursor: 'new-cursor'
-            }) });
+            return new Promise(r => { fetchResolvers.push(r); });
         };
         const { runners, doc } = createDirectoryVM(fetchMock);
 
         const p1 = runners.loadRunnerList(true);
         const p2 = runners.loadRunnerList(true);
 
-        await p2; // second resolves fast
+        // Both fetches deferred. Resolve second first (fast), first second (slow).
+        // When first resolves, token check fails because second already incremented token.
+        fetchResolvers[1]({ ok: true, json: () => Promise.resolve({
+            items: [{ user_id: 'new', display_name: 'New', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 0, is_following: false }],
+            next_cursor: 'new-cursor'
+        }) });
+
+        await new Promise(r => setTimeout(r, 10));
+
+        // First fetch resolves, but token check will fail
+        fetchResolvers[0]({ ok: true, json: () => Promise.resolve({
+            items: [{ user_id: 'stale', display_name: 'Stale', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 0, is_following: false }],
+            next_cursor: 'stale-cursor'
+        }) });
+
+        await Promise.all([p1, p2]);
 
         const itemsEl = doc.getElementById('runners-list-items');
         const ids = itemsEl._children.map(c => c.dataset.userId);
         assert.ok(ids.includes('new'), 'new item present');
-        assert.equal(runners._nextCursor, 'new-cursor');
+        assert.ok(!ids.includes('stale'), 'stale item rejected by token check');
+        assert.equal(runners._nextCursor, 'new-cursor', 'cursor from new response only');
     });
 });
 
@@ -560,22 +613,51 @@ describe('empty and error states', () => {
 });
 
 describe('follow state update', () => {
-    it('updateRunnerFollowState does not throw', async () => {
+    it('updateRunnerFollowState updates counter, badge, and ignores other userId', async () => {
         const fetchMock = () => Promise.resolve({ ok: true, json: () => Promise.resolve({
-            items: [{ user_id: 'u1', display_name: 'A', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 5, is_following: false }],
+            items: [
+                { user_id: 'u1', display_name: 'Alice', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 5, is_following: false },
+                { user_id: 'u2', display_name: 'Bob', avatar_url: null, city: null, club_name: null, bio: null, followers_count: 3, is_following: false },
+            ],
             next_cursor: null
         }) });
         const { runners, doc } = createDirectoryVM(fetchMock);
 
         await runners.loadRunnerList(true);
 
-        // Should not throw
-        runners.updateRunnerFollowState('u1', { is_following: true, followers_count: 6 });
-        runners.updateRunnerFollowState('u1', { is_following: false, followers_count: 5 });
-        runners.updateRunnerFollowState('nonexistent', { is_following: true, followers_count: 10 });
-
         const itemsEl = doc.getElementById('runners-list-items');
-        assert.equal(itemsEl._children.length, 1, 'card still exists');
+        assert.equal(itemsEl._children.length, 2);
+
+        // Get card1's footer and followers element directly
+        const card1 = itemsEl._children[0];
+        const footer1 = card1._children[1]; // footer is second child
+        const followersEl1 = footer1._children[0]; // followers is first child of footer
+        assert.ok(followersEl1.textContent.includes('5'), 'initial followers=5');
+
+        // Follow u1
+        runners.updateRunnerFollowState('u1', { is_following: true, followers_count: 6 });
+
+        // Verify u1 followers updated
+        assert.ok(followersEl1.textContent.includes('6'), 'u1 followers updated to 6');
+        // Verify u1 badge exists (inserted at index 0)
+        const badge1 = footer1._children[0];
+        assert.ok(badge1 && badge1.className.includes('following-badge'), 'u1 badge present');
+
+        // Verify u2 NOT changed
+        const card2 = itemsEl._children[1];
+        const footer2 = card2._children[1];
+        const followersEl2 = footer2._children[0];
+        assert.ok(followersEl2.textContent.includes('3'), 'u2 followers unchanged');
+        const badge2 = footer2._children.find(c => c.className && c.className.includes('following-badge'));
+        assert.ok(!badge2, 'u2 has no badge');
+
+        // Unfollow u1
+        runners.updateRunnerFollowState('u1', { is_following: false, followers_count: 5 });
+
+        assert.ok(followersEl1.textContent.includes('5'), 'u1 followers back to 5');
+        // Badge should be removed
+        const badgeAfter = footer1._children.find(c => c.className && c.className.includes('following-badge'));
+        assert.ok(!badgeAfter, 'u1 badge removed');
     });
 });
 
